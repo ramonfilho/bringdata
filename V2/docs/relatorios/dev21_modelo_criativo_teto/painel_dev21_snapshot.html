@@ -1,0 +1,657 @@
+<title>DEV21: resultado por campanha</title>
+<!--
+  PAINEL-DADOS: template declarativo reutilizável.
+  Para um painel novo: NÃO reescreva o runtime. Só edite o objeto SPEC lá embaixo
+  e publique este arquivo com a ferramenta Artifact.
+
+  SPEC = {
+    eyebrow, title, subtitle(html), source,
+    tiles: [{color, label, value, note}],
+    sections: [
+      { title, sub, chart: {                       // gráfico de barras (1 série)
+          type:'bars', unit:'%'|'R$'|'', dec, color:'accent'|'c1'|'#hex',
+          data:[{label, mean, std?, partial?}] } },
+      { title, sub, chart: {                        // barras agrupadas (N séries)
+          type:'grouped', unit, dec,
+          series:[{name, color}],                   // 2-3; cores c1/c2/c3
+          groups:[{label, values:[{mean,std?}], partial?}] } },
+      { title, sub, chart: {                        // linha (série temporal / ordinal)
+          type:'line', unit, dec,
+          xlabels:[...], series:[{name, color, data:[num,...]}] } },
+      { title, sub, chart: {                        // tabela-mapa (heatmap por bucket)
+          type:'heat', unit, dec, cols:[...],
+          rows:[{label, values:[num,...]}],
+          buckets:[{lt:8,cls:'s'},{lt:20,cls:'m'},{cls:'v'}] } },  // s=verde m=amarelo v=vermelho
+      { title, sub, html:'<p>...</p>' }             // seção de prosa livre
+    ],
+    footer
+  }
+  Regras: 1 eixo por gráfico; hues categóricas em ordem fixa (c1,c2,c3), nunca cicladas;
+  legenda quando >=2 séries; hastes = ±1 desvio (passe std) pra mostrar estabilidade;
+  cores já validadas (CVD) em light e dark. Para 4+ séries, rode o validador do /dataviz.
+-->
+<style>
+  :root{
+    --surface:#fcfcfb; --surface-2:#f4f4f1; --border:#e5e4df;
+    --ink:#1b2128; --muted:#5c6672; --faint:#8a929c; --grid:#e8e7e2;
+    --accent:#6d54d9; --c1:#2f6df0; --c2:#e08a1e; --c3:#0f9d8f;
+    --s:#2f9e6a; --m:#c8871b; --v:#d64545;
+    --s-bg:#e5f3ec; --m-bg:#f7edda; --v-bg:#f7e2e2;
+    --shadow:0 1px 2px rgba(20,25,32,.05),0 4px 16px rgba(20,25,32,.04);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#16181c; --surface-2:#1f2228; --border:#2c3037;
+    --ink:#e9ebee; --muted:#9aa3ad; --faint:#6b7480; --grid:#282c33;
+    --accent:#8a78ea; --c1:#5b8dff; --c2:#c67d1c; --c3:#1f9c8b;
+    --s:#3fb37f; --m:#d99a35; --v:#e56a6a;
+    --s-bg:#16302440; --m-bg:#33280f60; --v-bg:#3a1e1e60;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }}
+  :root[data-theme="light"]{--surface:#fcfcfb;--surface-2:#f4f4f1;--border:#e5e4df;--ink:#1b2128;--muted:#5c6672;--faint:#8a929c;--grid:#e8e7e2;--accent:#6d54d9;--c1:#2f6df0;--c2:#e08a1e;--c3:#0f9d8f;--s:#2f9e6a;--m:#c8871b;--v:#d64545;--s-bg:#e5f3ec;--m-bg:#f7edda;--v-bg:#f7e2e2;}
+  :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 64px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
+  h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
+  .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
+  .sub b{color:var(--ink);font-weight:620}
+  .src{margin-top:6px;font-size:13px;color:var(--faint)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px}
+  .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+  .tile .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .tile .val{font-size:26px;font-weight:730;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .tile .note{font-size:12.5px;color:var(--faint);margin-top:5px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  section{margin-top:40px}
+  h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:74ch}
+  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  svg{display:block;width:100%;height:auto;min-width:520px}
+  .grid-l{stroke:var(--grid);stroke-width:1}
+  .axis-t{fill:var(--faint);font-size:11px;font-family:var(--mono)}
+  .xlab{fill:var(--muted);font-size:12.5px;font-weight:600;font-family:var(--sans)}
+  .xlab.part{fill:var(--faint)}
+  .vlab{fill:var(--ink);font-size:11.5px;font-weight:640;font-family:var(--mono)}
+  .whisk{stroke:var(--ink);stroke-width:1.6;opacity:.5}
+  .bar{cursor:pointer} .bar.part{opacity:.42}
+  .mk{stroke:var(--surface);stroke-width:2}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  th,td{padding:9px 10px;text-align:center;font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--border)}
+  td.metric{text-align:left;color:var(--ink);font-weight:600;white-space:nowrap}
+  tbody tr+tr td{border-top:1px solid var(--border)}
+  .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
+  .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
+  .prose{color:var(--muted);font-size:14.5px;max-width:74ch}
+  .prose b{color:var(--ink)} .prose li{margin:9px 0}
+  .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
+  .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+  #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;background:var(--ink);color:var(--surface);font-size:12px;font-family:var(--mono);padding:7px 10px;border-radius:8px;box-shadow:var(--shadow);white-space:nowrap;transform:translate(-50%,-115%)}
+</style>
+<style>
+h4.bl{margin:20px 0 4px;font-size:14px;font-weight:700;letter-spacing:.01em}
+h4.bl span{font-weight:400;font-size:12px;color:var(--muted,#777);margin-left:8px}
+.tb b.ok{color:#1a7f52} .tb .ic{font-size:10.5px;color:var(--muted,#888);white-space:nowrap}
+.tb .ruido{color:var(--muted,#999);font-style:italic;font-size:11.5px}
+.tb th.sp{font-size:9.5px;border-left:1px solid rgba(128,128,128,.28)}
+.tb td.z{color:var(--muted,#bbb);text-align:center}
+@media (prefers-color-scheme:dark){.tb b.ok{color:#5cc192}.tb td.z{color:#555}}
+</style>
+<style>
+.tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
+.tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
+.tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
+  font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
+.tb th:first-child,.tb td:first-child{text-align:left}
+.tb td{padding:8px 11px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
+.tb tr.ag td{font-weight:700;background:rgba(128,128,128,.07)}
+.tb td.pos{color:#1a7f52;font-weight:650} .tb td.neg{color:#b1442f;font-weight:650}
+@media (prefers-color-scheme:dark){.tb td.pos{color:#5cc192}.tb td.neg{color:#e08a7a}}
+</style>
+
+<div class="wrap" id="app"></div>
+<div id="tip"></div>
+
+<script>
+/* ==== SPEC: edite só isto para um painel novo (exemplo abaixo = qualidade por LF) ==== */
+const SPEC = {
+  eyebrow: "DevClub · lançamento DEV21 · captação 21/07 a 03/08 · vendas 10/08 a 16/08",
+  title: "Resultado do DEV21 por campanha",
+  subtitle: "Mesma régua do debriefing geral: produto principal, sem Operação 50k e sem MBA, e <b>sem as três vendas devolvidas</b>. O lançamento fechou no lucro, mas o público quente pagou a conta.",
+  source: "Base: cadastros do front, analytics.sales e analytics.ad_spend. Boleto a 50% no faturamento, gasto Meta com imposto de 13%, Google sem.",
+  tiles: [
+    {color:"c1", label:"Investimento em mídia", value:"R$ 172.838,43", note:"Meta com imposto, Google sem"},
+    {color:"c3", label:"Leads captados", value:"27,317".replace(",","."), note:"CPL de R$ 6,33"},
+    {color:"accent", label:"Alunos (produto principal)", value:"283", note:"89 no cartão, 194 no boleto"},
+    {color:"c2", label:"Faturamento", value:"R$ 386.962,40", note:"boleto contado a 50%"},
+    {color:"c1", label:"ROAS", value:"2,24", note:"faturamento sobre mídia"},
+    {color:"c3", label:"Lucro", value:"R$ 214.123,98", note:"mais 18 combos, R$ 26.569,36"}
+  ],
+  sections: [
+    { title:"Onde o dinheiro voltou e onde não voltou",
+      sub:"Lucro em reais de cada campanha. O quente do Champion sozinho responde por três quartos do resultado.",
+      chart:{ type:"bars", unit:"R$", dec:0, color:"accent",
+        data:[
+          {label:"HQLB quente", mean:55998},
+          {label:"HQLB frio", mean:17654},
+          {label:"Google Ads", mean:9550},
+          {label:"TOP30 frio", mean:7541},
+          {label:"TOP50 frio", mean:3085},
+          {label:"Lead quente", mean:1177},
+          {label:"TOP10 frio", mean:-779},
+          {label:"Lead frio", mean:-813}
+        ] } },
+    { title:"Retorno sobre a mídia",
+      sub:"Abaixo de 1,00 a campanha devolve menos do que consome. O TOP30 do Challenger foi o melhor retorno por real gasto de todo o lançamento.",
+      chart:{ type:"bars", unit:"", dec:2, color:"c1",
+        data:[
+          {label:"TOP30 frio", mean:2.48},
+          {label:"HQLB quente", mean:1.97},
+          {label:"TOP50 frio", mean:1.40},
+          {label:"Google Ads", mean:1.30},
+          {label:"HQLB frio", mean:1.29},
+          {label:"Lead frio", mean:0.89},
+          {label:"TOP10 frio", mean:0.61}
+        ] } },
+    { title:"Quanto de cada campanha virou aluno",
+      sub:"O orgânico converte quase quatro vezes a média paga, e sem custo de mídia nenhum.",
+      chart:{ type:"bars", unit:"%", dec:2, color:"c3",
+        data:[
+          {label:"Outro / Orgânico", mean:3.27},
+          {label:"TOP30 frio", mean:1.07},
+          {label:"Google Ads", mean:0.87},
+          {label:"HQLB quente", mean:0.86},
+          {label:"TOP50 frio", mean:0.68},
+          {label:"HQLB frio", mean:0.67},
+          {label:"TOP10 frio", mean:0.38},
+          {label:"Lead frio", mean:0.33}
+        ] } },
+    { title:"Campanha por campanha",
+      sub:"Mesma estrutura do debriefing geral, com faturamento, ROAS e lucro acrescentados.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>Investimento R$</th><th>Leads</th><th>CPL</th><th>Cart</th><th>Bol</th><th>Geral</th><th>Conv</th><th>Faturamento R$</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>57.731.97</td><td>9.504</td><td>6,07</td><td>26</td><td>56</td><td><b>82</b></td><td>0,86%</td><td>113.729,99</td><td class="pos">1,97</td><td class="pos">55.998,02</td></tr>
+<tr><td>HQLB · FRIO</td><td>61.028.08</td><td>8.537</td><td>7,15</td><td>18</td><td>39</td><td><b>57</b></td><td>0,67%</td><td>78.682,50</td><td class="pos">1,29</td><td class="pos">17.654,42</td></tr>
+<tr><td>TOP50 · FRIO</td><td>7.651.78</td><td>1.326</td><td>5,77</td><td>1</td><td>8</td><td><b>9</b></td><td>0,68%</td><td>10.737,00</td><td class="pos">1,40</td><td class="pos">3.085,22</td></tr>
+<tr><td>TOP30 · FRIO</td><td>5.097.97</td><td>839</td><td>6,08</td><td>3</td><td>6</td><td><b>9</b></td><td>1,07%</td><td>12.639,29</td><td class="pos">2,48</td><td class="pos">7.541,32</td></tr>
+<tr><td>TOP10 · FRIO</td><td>2.001.49</td><td>261</td><td>7,67</td><td>0</td><td>1</td><td><b>1</b></td><td>0,38%</td><td>1.222,00</td><td class="neg">0,61</td><td class="neg">-779,49</td></tr>
+<tr><td>Lead · FRIO</td><td>7.110.37</td><td>1.538</td><td>4,62</td><td>1</td><td>4</td><td><b>5</b></td><td>0,33%</td><td>6.297,80</td><td class="neg">0,89</td><td class="neg">-812,57</td></tr>
+<tr><td>Lead · QUENTE</td><td>44.79</td><td>13</td><td>3,45</td><td>0</td><td>1</td><td><b>1</b></td><td>7,69%</td><td>1.222,00</td><td class="pos">27,28</td><td class="pos">1.177,21</td></tr>
+<tr><td>Lead · sem rótulo</td><td>-</td><td>228</td><td>-</td><td>1</td><td>0</td><td><b>1</b></td><td>0,44%</td><td>1.997,00</td><td class="">-</td><td class="">-</td></tr>
+<tr><td>Google Ads</td><td>32.171.97</td><td>3.544</td><td>9,08</td><td>9</td><td>22</td><td><b>31</b></td><td>0,87%</td><td>41.721,67</td><td class="pos">1,30</td><td class="pos">9.549,70</td></tr>
+<tr><td>Outro / Orgânico</td><td>-</td><td>1.527</td><td>-</td><td>16</td><td>34</td><td><b>50</b></td><td>3,27%</td><td>68.264,87</td><td class="">-</td><td class="">-</td></tr>
+<tr class="ag"><td>Não está na base de Leads</td><td>-</td><td>0</td><td>-</td><td>14</td><td>23</td><td><b>37</b></td><td>-</td><td>50.448,28</td><td class="">-</td><td class="">-</td></tr>
+<tr class="ag"><td>TOTAL</td><td>172.838.43</td><td>27.317</td><td>6,33</td><td>89</td><td>194</td><td><b>283</b></td><td>1,04%</td><td>386.962,40</td><td class="pos">2,24</td><td class="pos">214.123,98</td></tr>
+</tbody></table></div>` },
+    { title:"Agregado por modelo",
+      sub:"As mesmas campanhas somadas pelo modelo que as serve.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Modelo</th><th>Investimento R$</th><th>Leads</th><th>CPL</th><th>Cart</th><th>Bol</th><th>Geral</th><th>Conv</th><th>Faturamento R$</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody>
+<tr><td>Champion abr_28 (HQLB)</td><td>118.760.05</td><td>18.041</td><td>6,58</td><td>44</td><td>95</td><td><b>139</b></td><td>0,77%</td><td>192.412,49</td><td class="pos">1,62</td><td class="pos">73.652,44</td></tr>
+<tr><td>Challenger jul_24 (TOP10/30/50)</td><td>14.751.25</td><td>2.426</td><td>6,08</td><td>4</td><td>15</td><td><b>19</b></td><td>0,78%</td><td>24.598,29</td><td class="pos">1,67</td><td class="pos">9.847,04</td></tr>
+<tr><td>Lead Padrão (Meta)</td><td>7.155.16</td><td>1.779</td><td>4,02</td><td>2</td><td>5</td><td><b>7</b></td><td>0,39%</td><td>9.516,80</td><td class="pos">1,33</td><td class="pos">2.361,64</td></tr>
+<tr><td>Google Ads</td><td>32.171.97</td><td>3.544</td><td>9,08</td><td>9</td><td>22</td><td><b>31</b></td><td>0,87%</td><td>41.721,67</td><td class="pos">1,30</td><td class="pos">9.549,70</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Combos, vitalício e anual entram à parte</b>, como no debriefing: 11 no cartão e 7 no boleto, 18 alunos, R$ 26.569,36 de faturamento. O investimento não é repetido aqui porque a mídia já está inteira alocada na tabela acima.</p>` },
+    { title:"Contra o debriefing geral",
+      sub:"Compradores no formato cartão / boleto / geral. O total bate, a distribuição não.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>Debriefing geral</th><th>Nosso</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>22 / 47 / 69</td><td>26 / 56 / 82</td></tr>
+<tr><td>HQLB · FRIO</td><td>15 / 36 / 51</td><td>18 / 39 / 57</td></tr>
+<tr><td>TOP50 · FRIO</td><td>0 / 7 / 7</td><td>1 / 8 / 9</td></tr>
+<tr><td>TOP30 · FRIO</td><td>2 / 5 / 7</td><td>3 / 6 / 9</td></tr>
+<tr><td>TOP10 · FRIO</td><td>0 / 1 / 1</td><td>0 / 1 / 1</td></tr>
+<tr><td>Lead · FRIO</td><td>0 / 4 / 4</td><td>1 / 4 / 5</td></tr>
+<tr><td>Lead · QUENTE</td><td>0 / 1 / 1</td><td>0 / 1 / 1</td></tr>
+<tr><td>Google Ads</td><td>8 / 16 / 24</td><td>9 / 22 / 31</td></tr>
+<tr><td>Outro / Orgânico</td><td>15 / 25 / 40</td><td>16 / 34 / 50</td></tr>
+<tr><td>Não está na base de Leads</td><td>34 / 46 / <b>80</b></td><td>14 / 23 / <b>37</b></td></tr>
+<tr class=ag><td>TOTAL</td><td>96 / 188 / <b>284</b></td><td>89 / 194 / <b>283</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>O total praticamente empata: 283 contra 284.</b> O que muda é onde os compradores caem. O debriefing deixa <b>80</b> alunos sem origem identificada; nós deixamos <b>37</b>. São <b>43 alunos a mais atribuídos a uma campanha</b>, e é por isso que quase toda linha nossa é maior que a dele.</p>` },
+    { title:"O modelo separou quem compra?",
+      sub:"Régua do Champion abr_28. Três leituras da mesma coisa: o topo contra o resto, o topo contra o fundo, e se a conversão sobe de forma consistente ao longo dos dez decis.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>Leads</th><th>% no D1-D2</th><th>Conv do fundo</th><th>% no D9-D10</th><th>Alunos no topo</th><th>Conv do topo</th><th>Conv do resto</th><th>Lift vs resto</th><th>Lift vs fundo</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>8.438</td><td>2,8%</td><td>0,424%</td><td>40,9%</td><td><b>35</b></td><td>1,013%</td><td>0,783%</td><td><b>1,29x</b><br><span class="ic">0,82 a 2,04</span></td><td>2,39x</td><td><b class="ok">1 em 79</b></td></tr>
+<tr><td>HQLB · FRIO</td><td>7.453</td><td>6,3%</td><td>0,423%</td><td>28,5%</td><td><b>14</b></td><td>0,659%</td><td>0,732%</td><td><b>0,90x</b><br><span class="ic">0,49 a 1,66</span></td><td>1,56x</td><td><span class="ruido">1 em 2, pode ser sorte</span></td></tr>
+<tr><td>Google Ads</td><td>3.197</td><td>7,9%</td><td>0,397%</td><td>33,9%</td><td><b>14</b></td><td>1,293%</td><td>0,757%</td><td><b>1,71x</b><br><span class="ic">0,84 a 3,49</span></td><td>3,26x</td><td><b class="ok">1 em 30</b></td></tr>
+<tr><td>TOP50 · FRIO</td><td>1.140</td><td>9,6%</td><td>0,000%</td><td>21,8%</td><td><b>4</b></td><td>1,613%</td><td>0,448%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 11, pode ser sorte</span></td></tr>
+<tr><td>TOP30 · FRIO</td><td>726</td><td>9,4%</td><td>0,000%</td><td>21,5%</td><td><b>1</b></td><td>0,641%</td><td>1,404%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 1, pode ser sorte</span></td></tr>
+<tr><td>TOP10 · FRIO</td><td>222</td><td>11,3%</td><td>0,000%</td><td>17,1%</td><td><b>0</b></td><td>0,000%</td><td>0,543%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 1, pode ser sorte</span></td></tr>
+<tr><td>Lead · FRIO</td><td>1.348</td><td>26,7%</td><td>0,278%</td><td>11,1%</td><td><b>1</b></td><td>0,671%</td><td>0,334%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 2, pode ser sorte</span></td></tr>
+<tr><td>Outro / Orgânico</td><td>1.340</td><td>3,7%</td><td>0,000%</td><td>63,0%</td><td><b>30</b></td><td>3,555%</td><td>2,823%</td><td><b>1,26x</b><br><span class="ic">0,67 a 2,35</span></td><td>&gt;0,58x</td><td><span class="ruido">1 em 19, pode ser sorte</span></td></tr>
+<tr class=ag><td>TODAS (agregado)</td><td>24.158</td><td>6,6%</td><td>0,313%</td><td>33,9%</td><td><b>101</b></td><td>1,232%</td><td>0,783%</td><td><b>1,57x</b><br><span class="ic">1,21 a 2,04</span></td><td>3,94x</td><td><b class="ok">menos de 1 em 10 mil</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A coluna "% no D1-D2" mede se a campanha fez o trabalho dela.</b> O quente do Champion joga só <b>2,8%</b> dos leads no fundo da régua e o frio <b>6,3%</b>, contra <b>26,7%</b> do Lead Padrão. As campanhas de modelo trazem de quatro a dez vezes menos lead desqualificado.</p>
+<p><b>Onde aparece "poucos alunos", a venda existiu, mas não no topo.</b> No TOP50, dos 8 alunos, 4 caíram em D9-D10 (metade dos alunos em 22% dos leads). No TOP30, dos 9 alunos só 1 chegou ao topo: 5 pararam em D4-D6. Com esse punhado, qualquer taxa calculada seria ruído, então a coluna fica vazia mas o número de alunos aparece ao lado.</p>` },
+    { title:"O Champion dentro das campanhas que ele mesmo comanda",
+      sub:"O que chamamos de território: as campanhas com a etiqueta LEADHQLB, cujo público a Meta monta a partir do evento que o abr_28 dispara. Ele pontua todo lead que entra, mas só nessas campanhas a nota dele decide quem o anúncio persegue.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Recorte</th><th>Leads</th><th>% no D1-D2</th><th>Conv do fundo</th><th>% no D9-D10</th><th>Alunos no topo</th><th>Conv do topo</th><th>Conv do resto</th><th>Lift vs resto</th><th>Lift vs fundo</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr class=ag><td>HQLB (território)</td><td>15.891</td><td>4,5%</td><td>0,423%</td><td>35,1%</td><td><b>49</b></td><td>0,878%</td><td>0,756%</td><td><b>1,16x</b><br><span class="ic">0,81 a 1,66</span></td><td>2,08x</td><td><b class="ok">1 em 54</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>No território dele, o modelo separa</b> (chance de ser sorte de 1 em 54). O resultado está concentrado: separa no quente e no Google, e <b>no frio do HQLB não separa</b>. É o único ponto do lançamento onde a nota não ordenou nada.</p>` },
+    { title:"O Challenger jul_24 na mesma régua",
+      sub:"O território dele são as campanhas TOP10, TOP30 e TOP50. Ele entrou em 25/07 e cobre 69% da captação, por isso os leads da primeira semana não têm nota dele.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Recorte</th><th>Leads</th><th>% no D1-D2</th><th>Conv do fundo</th><th>% no D9-D10</th><th>Alunos no topo</th><th>Conv do topo</th><th>Conv do resto</th><th>Lift vs resto</th><th>Lift vs fundo</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>8.438</td><td>2,8%</td><td>0,426%</td><td>46,7%</td><td><b>42</b></td><td>1,065%</td><td>0,712%</td><td><b>1,50x</b><br><span class="ic">0,95 a 2,37</span></td><td>2,50x</td><td><b class="ok">1 em 126</b></td></tr>
+<tr><td>Google Ads</td><td>1.807</td><td>11,5%</td><td>0,000%</td><td>27,8%</td><td><b>5</b></td><td>0,994%</td><td>1,074%</td><td><b>0,93x</b><br><span class="ic">0,34 a 2,56</span></td><td>&gt;0,69x</td><td><span class="ruido">1 em 11, pode ser sorte</span></td></tr>
+<tr class=ag><td>TOP10/30/50 (território)</td><td>2.088</td><td>19,7%</td><td>0,243%</td><td>15,8%</td><td><b>6</b></td><td>1,818%</td><td>0,683%</td><td><b>2,66x</b><br><span class="ic">1,01 a 7,05</span></td><td>7,47x</td><td><b class="ok">1 em 102</b></td></tr>
+<tr class=ag><td>TODAS (agregado)</td><td>16.556</td><td>8,9%</td><td>0,408%</td><td>35,9%</td><td><b>80</b></td><td>1,345%</td><td>0,858%</td><td><b>1,57x</b><br><span class="ic">1,16 a 2,11</span></td><td>3,30x</td><td><b class="ok">menos de 1 em 10 mil</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Nos mesmos 8.438 leads do quente, o jul_24 separa mais que o abr_28</b>: 1,50x contra 1,29x. No território próprio, mesmo com só 6 alunos no topo, a separação aparece: <b>2,66x</b>, e o topo rende <b>7,47x</b> o fundo.</p>` },
+    { title:"O que a régua do modelo valeu em dinheiro",
+      sub:"Cada lead foi custeado pelo CPL da unidade em que ele caiu. Isso segura o preço e deixa só a receita variar, que é exatamente a pergunta: a nota do lead previu dinheiro, e não só compra.",
+      chart:{ type:"bars", unit:"", dec:2, color:"accent", data:[
+        {label:"D1-D2", mean:0.76},{label:"D3-D4", mean:0.97},{label:"D5-D6", mean:1.33},{label:"D7-D8", mean:1.96},{label:"D9-D10", mean:2.05}] },
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Balde</th><th>Leads</th><th>Alunos</th><th>Conv</th>
+<th class="sp">CPL pago</th><th>Ticket</th><th>Faturamento</th><th>Custo</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody>
+<tr><td><b>D1-D2</b></td><td>1.520</td><td>5</td><td>0,329%</td><td class="sp">R$ 6,39</td><td>R$ 1.476</td><td>R$ 7.379</td><td>R$ 9.709</td><td class="neg"><b>0,76</b></td><td class="neg">-R$ 2.331</td></tr>
+<tr><td><b>D3-D4</b></td><td>3.425</td><td>16</td><td>0,467%</td><td class="sp">R$ 6,60</td><td>R$ 1.374</td><td>R$ 21.984</td><td>R$ 22.610</td><td class="neg"><b>0,97</b></td><td class="neg">-R$ 626</td></tr>
+<tr><td><b>D5-D6</b></td><td>4.129</td><td>28</td><td>0,678%</td><td class="sp">R$ 6,70</td><td>R$ 1.314</td><td>R$ 36.801</td><td>R$ 27.679</td><td class=""><b>1,33</b></td><td class="pos">R$ 9.122</td></tr>
+<tr><td><b>D7-D8</b></td><td>6.184</td><td>62</td><td>1,003%</td><td class="sp">R$ 6,75</td><td>R$ 1.322</td><td>R$ 81.937</td><td>R$ 41.718</td><td class=""><b>1,96</b></td><td class="pos">R$ 40.219</td></tr>
+<tr><td><b>D9-D10</b></td><td>7.244</td><td>71</td><td>0,980%</td><td class="sp">R$ 6,80</td><td>R$ 1.422</td><td>R$ 100.952</td><td>R$ 49.291</td><td class="pos"><b>2,05</b></td><td class="pos">R$ 51.661</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>O número que prova a tese está na coluna do CPL: ela é plana.</b> Do fundo ao topo da régua o lançamento pagou entre <b>R$ 6,39</b> e <b>R$ 6,80</b> pelo lead, uma variação de 7%. O ROAS foi de <b>0,76</b> a <b>2,05</b>. Como o custo não mexeu, toda a diferença é receita, e quem a ordenou foi o modelo.</p>
+<p><b>O fundo da régua destrói dinheiro e o topo paga o lançamento.</b> Os 1.520 leads do D1-D2 deram prejuízo de R$ 2.331. Os 7.244 do D9-D10 deram <b>R$ 51.661</b> de lucro.</p>
+<p><b>Uma coisa o modelo não faz: prever quanto a pessoa gasta.</b> O ticket é praticamente o mesmo em todos os baldes, de R$ 1.314 a R$ 1.476. Ele acerta <i>quem</i> compra, não <i>quanto</i> compra. E os dois baldes de cima empataram entre si neste lançamento (1,003% contra 0,980%), então aqui a separação foi 40% de cima contra 60% de baixo. Na referência histórica de 86 mil leads o degrau entre eles existe (1,407% contra 0,934%, 1,5x): o empate é deste lançamento, não da régua.</p>
+<h4 class="cap">O Challenger jul_24 na mesma conta</h4>
+<div class="tw"><table class="tb"><thead><tr><th>Balde</th><th>Leads</th><th>Alunos</th><th>Conv</th>
+<th class="sp">CPL pago</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody>
+<tr><td><b>D1-D2</b></td><td>1.393</td><td>5</td><td>0,359%</td><td class="sp">R$ 6,58</td><td class="neg"><b>0,82</b></td><td class="neg">-R$ 1.640</td></tr>
+<tr><td><b>D3-D4</b></td><td>2.479</td><td>13</td><td>0,524%</td><td class="sp">R$ 6,52</td><td class=""><b>1,03</b></td><td class="pos">R$ 469</td></tr>
+<tr><td><b>D5-D6</b></td><td>2.368</td><td>14</td><td>0,591%</td><td class="sp">R$ 6,50</td><td class=""><b>1,16</b></td><td class="pos">R$ 2.501</td></tr>
+<tr><td><b>D7-D8</b></td><td>3.744</td><td>47</td><td>1,255%</td><td class="sp">R$ 6,59</td><td class="pos"><b>2,63</b></td><td class="pos">R$ 40.308</td></tr>
+<tr><td><b>D9-D10</b></td><td>5.259</td><td>57</td><td>1,084%</td><td class="sp">R$ 6,41</td><td class="pos"><b>2,43</b></td><td class="pos">R$ 48.081</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px">Mesmo desenho, separação mais forte: o D7-D8 do Challenger entrega ROAS <b>2,63</b>, o melhor balde de qualquer uma das duas réguas.</p>` },
+    { title:"Separar não é a mesma coisa que dar lucro",
+      sub:"As duas leituras lado a lado. À esquerda, se o modelo ordenou os leads daquela campanha. À direita, se aquela campanha devolveu dinheiro. Elas não andam juntas, e é isso que decide o que fazer.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>Lift do topo</th><th>Chance de ser sorte</th><th>Separou?</th>
+<th class="sp">Conversão</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>1,29x</td><td><b class="ok">1,3%</b></td><td><b class="ok">sim</b></td><td class="sp">0,863%</td><td class="pos"><b>1,97</b></td><td class="pos">R$ 55.998</td></tr>
+<tr><td>HQLB · FRIO</td><td>0,90x</td><td>60,9%</td><td><b class="neg">não</b></td><td class="sp">0,668%</td><td class="pos"><b>1,29</b></td><td class="pos">R$ 17.654</td></tr>
+<tr><td>Google Ads</td><td>1,71x</td><td><b class="ok">3,4%</b></td><td><b class="ok">sim</b></td><td class="sp">0,875%</td><td class="pos"><b>1,30</b></td><td class="pos">R$ 9.550</td></tr>
+<tr><td>TOP30 · FRIO</td><td>0,46x</td><td>86,7%</td><td><b class="neg">não</b></td><td class="sp">1,073%</td><td class="pos"><b>2,48</b></td><td class="pos">R$ 7.541</td></tr>
+<tr><td>TOP50 · FRIO</td><td>3,60x</td><td>9,1%</td><td><b class="neg">não</b></td><td class="sp">0,679%</td><td class="pos"><b>1,40</b></td><td class="pos">R$ 3.085</td></tr>
+<tr><td>TOP10 · FRIO</td><td><span class="z">ruído</span></td><td>76,6%</td><td><b class="neg">não</b></td><td class="sp">0,383%</td><td class="neg"><b>0,61</b></td><td class="neg">-R$ 779</td></tr>
+<tr><td>Lead · FRIO</td><td>2,01x</td><td>52,0%</td><td><b class="neg">não</b></td><td class="sp">0,325%</td><td class="neg"><b>0,89</b></td><td class="neg">-R$ 813</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>O caso que interessa é o HQLB frio.</b> Ali o modelo <b>não</b> separou (lift 0,90x, 60,9% de chance de ser sorte), e mesmo assim a campanha devolveu <b>R$ 17.654</b> de lucro com ROAS 1,29. Ordenar leads e gerar lucro são coisas diferentes.</p>
+<p class="ic"><b>Como ler a coluna do lift junto com a da sorte.</b> Um lift grande acompanhado de uma chance de sorte grande, como o 3,60x do TOP50 com 9,1%, não quer dizer que o modelo funcionou ali: quer dizer que a campanha é pequena demais para saber. Com 9 alunos no total, trocar um único comprador de balde vira o número. A coluna "Separou?" só diz sim quando o resultado sobrevive a esse teste.</p>
+<p><b>A explicação é que o modelo faz dois trabalhos, e só um deles é o ranking.</b> O primeiro trabalho acontece <b>antes de o lead existir</b>: o evento que o modelo dispara para a Meta a cada lead bom vira o alvo de otimização da campanha, e a Meta sai caçando gente parecida com quem já pontuou alto. É assim que o sinal <b>constrói o público</b>. O segundo trabalho é <b>ordenar os leads</b> depois que eles chegam. São medições em momentos diferentes, e é por isso que uma pode falhar com a outra funcionando.</p>
+<p><b>E há um motivo mecânico para o ranking parecer fraco justamente onde o público é bom.</b> Quando o primeiro trabalho funciona, ele corta o fundo da régua antes de o lead entrar: o HQLB frio recebeu só 6,3% de leads no D1-D2, contra 26,7% do Lead frio. Sobra um público comprimido no meio e no topo, e ordenar gente parecida entre si é muito mais difícil do que separar bom de ruim. É o mesmo efeito de comparar aprovados de um vestibular: entre quem já passou, a nota da prova quase não prevê o desempenho no curso, porque a seleção já jogou fora a variação que a nota enxergava. A prova de que o público veio melhor está na conversão: <b>0,668%</b> no HQLB frio contra <b>0,325%</b> do Lead frio, 2,05 vezes mais.</p>
+<h4 class="cap">O histórico: o abr_28 no público frio, lançamento a lançamento</h4>
+<p style="margin-bottom:12px">Antes de decidir qualquer coisa, a pergunta certa: a falha do DEV21 é o padrão dele ou a exceção? A nota do abr_28 está gravada em todo lead desde 25/05, primeiro rodando <b>em sombra</b> (pontuava tudo, sem comandar a verba) e, a partir de <b>22/06</b>, como o modelo principal da conta, quando passou a levar o orçamento e o objetivo de otimização na Meta.</p>
+<div class="tw"><table class="tb"><thead><tr><th>Lançamento</th><th>Papel</th><th>Leads frios</th><th>Alunos</th><th>Conv topo</th><th>Conv resto</th><th>Lift</th><th>%D1-D2</th></tr></thead><tbody>
+<tr><td><b>LF56</b></td><td>sombra</td><td>4.887</td><td>41</td><td>1,259%</td><td>0,737%</td><td class="pos"><b>1,71x</b></td><td>19,8%</td></tr>
+<tr><td><b>LF57</b></td><td>sombra</td><td>4.567</td><td>32</td><td>1,205%</td><td>0,589%</td><td class="pos"><b>2,05x</b></td><td>16,3%</td></tr>
+<tr><td><b>LF58</b></td><td>sombra</td><td>6.828</td><td>30</td><td>1,229%</td><td>0,239%</td><td class="pos"><b>5,15x</b></td><td>16,0%</td></tr>
+<tr><td><b>LF59</b></td><td>sombra</td><td>4.716</td><td>19</td><td>0,746%</td><td>0,302%</td><td class="pos"><b>2,47x</b></td><td>13,6%</td></tr>
+<tr><td><b>LF60</b></td><td>principal</td><td>8.554</td><td>44</td><td>0,841%</td><td>0,389%</td><td class="pos"><b>2,17x</b></td><td>7,3%</td></tr>
+<tr><td><b>LF61</b></td><td>principal</td><td>7.093</td><td>52</td><td>1,118%</td><td>0,585%</td><td class="pos"><b>1,91x</b></td><td>7,9%</td></tr>
+<tr><td><b>LF62</b></td><td>principal</td><td>6.788</td><td>43</td><td>1,139%</td><td>0,480%</td><td class="pos"><b>2,37x</b></td><td>11,1%</td></tr>
+<tr><td><b>LF63</b></td><td>principal</td><td>6.389</td><td>37</td><td>0,683%</td><td>0,544%</td><td class=""><b>1,25x</b></td><td>9,8%</td></tr>
+<tr class="ag"><td><b>DEV21</b></td><td>principal</td><td>10.890</td><td>81</td><td>0,811%</td><td>0,722%</td><td class=""><b>1,12x</b></td><td>9,5%</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>O DEV21 é o pior ponto da série, não o padrão.</b> No público frio o abr_28 ficou acima de 1 em <b>9 de 9 lançamentos</b>, com lift agrupado de <b>1,87x</b> (intervalo de 1,52 a 2,30, segurando o lançamento fixo) em 60.712 leads. Restringindo só às campanhas HQLB frias, 1,57x em 8 lançamentos. <b>Desativar no frio agora seria reagir ao pior ponto de uma série que aponta para o outro lado.</b></p>
+<p><b>O que a série pede é vigilância, não desligamento.</b> Os dois lançamentos mais recentes são os dois mais fracos (1,25x no LF63 e 1,12x no DEV21). Dois pontos não fazem tendência, mas fazem um alerta: se o próximo lançamento frio vier abaixo de 1, aí sim a conversa de desligar ou retreinar se abre, com três pontos na mão. E repare na coluna %D1-D2 caindo de 19,8% para 9,5% ao longo da série: o público frio entregue foi ficando mais limpo, que é exatamente a compressão que dificulta o ranking descrita acima.</p>
+<p><b>Três ressalvas que acompanham este ponto de atenção.</b> Primeira: o ponto fraco do DEV21 pode ser em boa parte <b>tamanho de amostra</b>. Com 81 compradores frios, o lift de 1,12x carrega um intervalo que vai de 0,69 a 1,83, e o 1,87x da série fica na beira de fora: o dado é compatível quase por inteiro com a escada de sempre mais azar de amostra. Segunda: mesmo onde o ranking falha, <b>separar não é dar lucro</b>, e o frio deste lançamento devolveu R$ 17.654 com ROAS 1,29. Terceira: se o terceiro ponto fraco vier, a <b>solução já está desenhada, e não é retreinar do jeito simples</b>. Retreinar o mesmo formulário com dado mais fresco já foi testado: o jul_24 ganha no quente (1,50x contra 1,29x) mas <b>empatou no frio deste lançamento</b> (1,26x contra 1,23x nos mesmos leads). Se a causa é a compressão descrita acima, o formulário saturou, e a saída é colocar no score <b>o que o formulário não vê</b>. O arsenal, já medido e em coleta: <b>entrar no grupo de WhatsApp</b> (separa ~3x dentro do mesmo decil; coleta no ar desde 10/06); a <b>nota do criativo por plataforma, com a fala do vídeo, dentro do score</b> (a única variante testada cujo ganho não toca o zero; no teste dos quatro braços, 92 compradores contra 67 na mesma fatia de tráfego); o <b>texto no teto</b> (a fala do vídeo como palpite inicial do criativo estreante na nota que ajusta o teto); e o <b>selo de comprador Hotmart</b> (~2x segurando a nota fixa, medido em 323 mil leads; a fusão com o modelo ainda não foi testada, de propósito, porque só o selo capturado ANTES da venda vale, e essa coleta roda desde 30/07). Mais duas possibilidades ainda sem dado: a <b>página de captura</b> e o <b>campo de texto aberto da pesquisa</b>. O A/B champion contra challenger deixa qualquer troca sem risco: o desafiante roda ao lado do titular até provar.</p>` },
+    { title:"Criativo: quem levou a verba, quem devolveu, e de onde veio o lucro",
+      sub:"Todas as campanhas somadas. As colunas da direita abrem o lucro total de cada criativo pela campanha em que ele rodou. Verba por anúncio: Meta pela ad_insights, Google puxado por ID na API.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>Gasto R$</th><th>% verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro total R$</th><th class="sp">HQLB<br>QUENTE</th><th class="sp">HQLB<br>FRIO</th><th class="sp">Google Ads</th><th class="sp">TOP50<br>FRIO</th><th class="sp">TOP30<br>FRIO</th><th class="sp">TOP10<br>FRIO</th><th class="sp">Lead<br>FRIO</th></tr></thead><tbody>
+<tr><td>AD0150-AD07</td><td>56.202</td><td>32,5%</td><td>9.853</td><td>5,70</td><td>78</td><td>0,79%</td><td class="pos">1,91</td><td class="pos"><b>50.952</b></td><td class="pos">24.130</td><td class="pos">19.508</td><td class="z">-</td><td class="pos">1.222</td><td class="pos">5.881</td><td class="pos">228</td><td class="z">-</td></tr>
+<tr><td>AD0150-AD02</td><td>29.801</td><td>17,2%</td><td>4.381</td><td>6,80</td><td>30</td><td>0,68%</td><td class="pos">1,41</td><td class="pos"><b>12.234</b></td><td class="pos">11.215</td><td class="pos">3.148</td><td class="z">-</td><td class="neg">-969</td><td class="neg">-713</td><td class="neg">-424</td><td class="z">-</td></tr>
+<tr><td>AD0160-AD08</td><td>27.779</td><td>16,1%</td><td>4.220</td><td>6,58</td><td>34</td><td>0,81%</td><td class="pos">1,65</td><td class="pos"><b>18.043</b></td><td class="pos">15.548</td><td class="neg">-2</td><td class="z">-</td><td class="pos">2.617</td><td class="neg">-86</td><td class="neg">-35</td><td class="z">-</td></tr>
+<tr><td>[G] AD0140-V0-PODCAST</td><td>16.790</td><td>9,7%</td><td>1.862</td><td>9,02</td><td>12</td><td>0,64%</td><td class="neg">0,99</td><td class="neg"><b>-207</b></td><td class="z">-</td><td class="z">-</td><td class="neg">-207</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>8.010</td><td>4,6%</td><td>993</td><td>8,07</td><td>14</td><td>1,41%</td><td class="pos">2,37</td><td class="pos"><b>10.940</b></td><td class="z">-</td><td class="z">-</td><td class="pos">10.940</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>AD0150-AD01</td><td>6.440</td><td>3,7%</td><td>878</td><td>7,33</td><td>8</td><td>0,91%</td><td class="pos">1,74</td><td class="pos"><b>4.772</b></td><td class="pos">3.906</td><td class="neg">-1.388</td><td class="z">-</td><td class="pos">257</td><td class="pos">2.498</td><td class="neg">-501</td><td class="z">-</td></tr>
+<tr><td>AD0160-AD11</td><td>5.095</td><td>2,9%</td><td>603</td><td>8,45</td><td>3</td><td>0,50%</td><td class="neg">0,67</td><td class="neg"><b>-1.698</b></td><td class="z">-</td><td class="neg">-1.698</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>AD0160 - VID - CAPTAÇÃO</td><td>2.490</td><td>1,4%</td><td>606</td><td>4,11</td><td>2</td><td>0,33%</td><td class="pos">1,23</td><td class="pos"><b>582</b></td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="pos">582</td></tr>
+<tr><td>AD0370-gravadosnosEUA</td><td>2.341</td><td>1,4%</td><td>270</td><td>8,67</td><td>1</td><td>0,37%</td><td class="neg">0,47</td><td class="neg"><b>-1.241</b></td><td class="z">-</td><td class="neg">-1.241</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>[G] AD0139-V0-PODCAST</td><td>2.180</td><td>1,3%</td><td>209</td><td>10,43</td><td>1</td><td>0,48%</td><td class="neg">0,49</td><td class="neg"><b>-1.105</b></td><td class="z">-</td><td class="z">-</td><td class="neg">-1.105</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>AD0150-V0 · pagando p/ aprender</td><td>1.947</td><td>1,1%</td><td>544</td><td>3,58</td><td>1</td><td>0,18%</td><td class="neg">0,55</td><td class="neg"><b>-872</b></td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="neg">-872</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>1.367</td><td>0,8%</td><td>162</td><td>8,44</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg"><b>-1.367</b></td><td class="z">-</td><td class="z">-</td><td class="neg">-1.367</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>[G] AD0014-V0-PODCAST</td><td>1.208</td><td>0,7%</td><td>85</td><td>14,21</td><td>1</td><td>1,18%</td><td class="neg">0,80</td><td class="neg"><b>-241</b></td><td class="z">-</td><td class="z">-</td><td class="neg">-241</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>[G] AD0149-V0 · pagando p/ aprender</td><td>998</td><td>0,6%</td><td>111</td><td>8,99</td><td>2</td><td>1,80%</td><td class="pos">3,08</td><td class="pos"><b>2.074</b></td><td class="z">-</td><td class="z">-</td><td class="pos">2.074</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>AD0027-V0-DEV</td><td>722</td><td>0,4%</td><td>193</td><td>3,74</td><td>1</td><td>0,52%</td><td class="pos">1,49</td><td class="pos"><b>354</b></td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="pos">354</td></tr>
+<tr><td>AD0455-casadeRodolfo-AD34-HOOK1-CORPOÚNICO</td><td>658</td><td>0,4%</td><td>21</td><td>31,34</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg"><b>-658</b></td><td class="z">-</td><td class="neg">-594</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="neg">-64</td></tr>
+<tr><td>[G] AD0138-V0-PODCAST</td><td>467</td><td>0,3%</td><td>49</td><td>9,53</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg"><b>-467</b></td><td class="z">-</td><td class="z">-</td><td class="neg">-467</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr><td>AD0389-gravadosnosEUA</td><td>404</td><td>0,2%</td><td>40</td><td>10,10</td><td>1</td><td>2,50%</td><td class="pos">4,94</td><td class="pos"><b>1.593</b></td><td class="z">-</td><td class="pos">1.593</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+<tr class=ag><td>Cauda: 144 criativos abaixo de R$ 400</td><td>7.939</td><td>4,6%</td><td>482</td><td>-</td><td>6</td><td>1,24%</td><td>0,97</td><td><b>-273</b></td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td><td class="z">-</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Três criativos da Meta levaram 65,8% de toda a verba.</b> O AD0150-AD07 sozinho gerou R$ 50.952 de lucro, e as colunas da direita mostram de onde: R$ 24.130 no quente, R$ 19.508 no frio, R$ 5.881 no TOP30. Ele é o único que ganhou dinheiro em todas as campanhas onde rodou.</p>
+<p><b>O AD0160-AD08 é o oposto: concentrado.</b> Dos R$ 18.043 de lucro dele, R$ 15.548 vieram só do quente; no frio ele empatou e nas TOP perdeu. E o AD0140 do Google consumiu R$ 16.790, quase 10% do lançamento, para voltar empatado.</p>` },
+    { title:"Cada criativo dentro de cada campanha",
+      sub:"A fatia da verba que cada um recebeu naquela campanha, contra a conversão que ela comprou.",
+      html:`<h4 class="bl">HQLB · QUENTE <span>R$ 57.732 de verba · 9.504 leads · 82 alunos · conversão da campanha 0,863%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>AD0160-AD08</td><td>43,1%</td><td>3.636</td><td>6,85</td><td>30</td><td>0,83%</td><td class="pos">1,62</td><td class="pos">15.548</td></tr>
+<tr><td>AD0150-AD07</td><td>37,3%</td><td>4.062</td><td>5,30</td><td>32</td><td>0,79%</td><td class="pos">2,12</td><td class="pos">24.130</td></tr>
+<tr><td>AD0150-AD02</td><td>15,7%</td><td>1.461</td><td>6,20</td><td>15</td><td>1,03%</td><td class="pos">2,24</td><td class="pos">11.215</td></tr>
+<tr><td>AD0150-AD01</td><td>3,9%</td><td>341</td><td>6,57</td><td>4</td><td>1,17%</td><td class="pos">2,74</td><td class="pos">3.906</td></tr>
+<tr><td>AD0150-AD03</td><td>0,0%</td><td>1</td><td>3,95</td><td>1</td><td>100,00%</td><td class="pos">308,98</td><td class="pos">1.218</td></tr></tbody></table></div>
+<h4 class="bl">HQLB · FRIO <span>R$ 61.028 de verba · 8.537 leads · 57 alunos · conversão da campanha 0,668%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>AD0150-AD07</td><td>47,4%</td><td>4.736</td><td>6,11</td><td>36</td><td>0,76%</td><td class="pos">1,67</td><td class="pos">19.508</td></tr>
+<tr><td>AD0150-AD02</td><td>28,7%</td><td>2.471</td><td>7,10</td><td>14</td><td>0,57%</td><td class="pos">1,18</td><td class="pos">3.148</td></tr>
+<tr><td>AD0160-AD11</td><td>8,3%</td><td>603</td><td>8,45</td><td>3</td><td>0,50%</td><td class="neg">0,67</td><td class="neg">-1.698</td></tr>
+<tr><td>AD0370-gravadosnosEUA</td><td>3,8%</td><td>270</td><td>8,67</td><td>1</td><td>0,37%</td><td class="neg">0,47</td><td class="neg">-1.241</td></tr>
+<tr><td>AD0150-AD01</td><td>2,3%</td><td>199</td><td>6,97</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-1.388</td></tr>
+<tr><td>AD0389-gravadosnosEUA</td><td>0,7%</td><td>40</td><td>10,10</td><td>1</td><td>2,50%</td><td class="pos">4,94</td><td class="pos">1.593</td></tr>
+<tr><td>AD0481-projetoDEV21-AD03</td><td>0,3%</td><td>10</td><td>19,92</td><td>1</td><td>10,00%</td><td class="pos">10,03</td><td class="pos">1.798</td></tr>
+<tr><td>AD0485-projetoDEV21-AD07</td><td>0,3%</td><td>14</td><td>12,04</td><td>1</td><td>7,14%</td><td class="pos">6,38</td><td class="pos">907</td></tr></tbody></table></div>
+<h4 class="bl">Google Ads <span>R$ 32.172 de verba · 3.544 leads · 31 alunos · conversão da campanha 0,875%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>[G] AD0140-V0-PODCAST</td><td>52,2%</td><td>1.862</td><td>9,02</td><td>12</td><td>0,64%</td><td class="neg">0,99</td><td class="neg">-207</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>24,9%</td><td>993</td><td>8,07</td><td>14</td><td>1,41%</td><td class="pos">2,37</td><td class="pos">10.940</td></tr>
+<tr><td>[G] AD0139-V0-PODCAST</td><td>6,8%</td><td>209</td><td>10,43</td><td>1</td><td>0,48%</td><td class="neg">0,49</td><td class="neg">-1.105</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>4,2%</td><td>162</td><td>8,44</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-1.367</td></tr>
+<tr><td>[G] AD0014-V0-PODCAST</td><td>3,8%</td><td>85</td><td>14,21</td><td>1</td><td>1,18%</td><td class="neg">0,80</td><td class="neg">-241</td></tr>
+<tr><td>[G] AD0149-V0 · pagando p/ aprender</td><td>3,1%</td><td>111</td><td>8,99</td><td>2</td><td>1,80%</td><td class="pos">3,08</td><td class="pos">2.074</td></tr>
+<tr><td>[G] AD0148-V0-conversa</td><td>1,2%</td><td>20</td><td>19,39</td><td>1</td><td>5,00%</td><td class="pos">2,77</td><td class="pos">687</td></tr></tbody></table></div>
+<h4 class="bl">TOP50 · FRIO <span>R$ 7.652 de verba · 1.326 leads · 9 alunos · conversão da campanha 0,679%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>AD0150-AD07</td><td>28,1%</td><td>417</td><td>5,16</td><td>3</td><td>0,72%</td><td class="pos">1,57</td><td class="pos">1.222</td></tr>
+<tr><td>AD0150-AD02</td><td>26,7%</td><td>289</td><td>7,07</td><td>1</td><td>0,35%</td><td class="neg">0,53</td><td class="neg">-969</td></tr>
+<tr><td>AD0150-AD01</td><td>22,7%</td><td>227</td><td>7,66</td><td>2</td><td>0,88%</td><td class="pos">1,15</td><td class="pos">257</td></tr>
+<tr><td>AD0160-AD08</td><td>21,9%</td><td>390</td><td>4,30</td><td>3</td><td>0,77%</td><td class="pos">2,56</td><td class="pos">2.617</td></tr></tbody></table></div>
+<h4 class="bl">TOP30 · FRIO <span>R$ 5.098 de verba · 839 leads · 9 alunos · conversão da campanha 1,073%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>AD0150-AD07</td><td>51,2%</td><td>482</td><td>5,42</td><td>6</td><td>1,24%</td><td class="pos">3,25</td><td class="pos">5.881</td></tr>
+<tr><td>AD0160-AD08</td><td>22,8%</td><td>186</td><td>6,24</td><td>1</td><td>0,54%</td><td class="neg">0,93</td><td class="neg">-86</td></tr>
+<tr><td>AD0150-AD02</td><td>14,0%</td><td>102</td><td>6,99</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-713</td></tr>
+<tr><td>AD0150-AD01</td><td>11,3%</td><td>62</td><td>9,25</td><td>2</td><td>3,23%</td><td class="pos">5,35</td><td class="pos">2.498</td></tr></tbody></table></div>
+<h4 class="bl">Lead · FRIO <span>R$ 7.110 de verba · 1.538 leads · 5 alunos · conversão da campanha 0,325%</span></h4><div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>% da verba</th><th>Leads</th><th>CPL</th><th>Alunos</th><th>Conv</th><th>ROAS</th><th>Lucro R$</th></tr></thead><tbody><tr><td>AD0160 - VID - CAPTAÇÃO</td><td>35,0%</td><td>606</td><td>4,11</td><td>2</td><td>0,33%</td><td class="pos">1,23</td><td class="pos">582</td></tr>
+<tr><td>AD0150-V0 · pagando p/ aprender</td><td>27,4%</td><td>544</td><td>3,58</td><td>1</td><td>0,18%</td><td class="neg">0,55</td><td class="neg">-872</td></tr>
+<tr><td>AD0027-V0-DEV</td><td>10,1%</td><td>193</td><td>3,74</td><td>1</td><td>0,52%</td><td class="pos">1,49</td><td class="pos">354</td></tr>
+<tr><td>AD0151-V0 · pagando p/ aprender</td><td>3,3%</td><td>31</td><td>7,58</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-235</td></tr>
+<tr><td>AD0022-V0-IA</td><td>3,3%</td><td>35</td><td>6,71</td><td>1</td><td>2,86%</td><td class="pos">4,58</td><td class="pos">840</td></tr>
+<tr><td>AD0135-V0-PODCAST</td><td>3,2%</td><td>23</td><td>9,75</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-224</td></tr>
+<tr><td>AD0156 - VID - CAPTAÇÃO</td><td>3,0%</td><td>24</td><td>9,02</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-216</td></tr>
+<tr><td>AD0138-V0-PODCAST</td><td>3,0%</td><td>22</td><td>9,60</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-211</td></tr>
+<tr><td>AD0154-V0-sem luz</td><td>2,9%</td><td>28</td><td>7,44</td><td>0</td><td>0,00%</td><td class="neg">0,00</td><td class="neg">-208</td></tr></tbody></table></div>
+<p style="margin-top:14px"><b>O caso mais claro é o Google.</b> O AD0140 ficou com 52,2% da verba e devolveu ROAS 0,99, enquanto o AD0150 "com música" ficou com 24,9% e devolveu 2,37. No HQLB frio, o AD0160-AD11 e o AD0370 queimaram R$ 2.939 juntos com retorno abaixo de 0,70.</p>` },
+    { title:"O criativo mexeu a conversão?",
+      sub:"Comparação entre os criativos da mesma campanha, contando só os que tiveram 200 leads ou mais.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>Pior criativo</th><th>Melhor criativo</th><th>Amplitude</th><th>Chance de ser sorte</th><th>Leitura</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>0,79%</td><td>1,17%</td><td>1,49x</td><td><span class="ruido">1 em 1, pode ser sorte</span></td><td>dentro do ruído</td></tr>
+<tr><td>HQLB · FRIO</td><td>0,37%</td><td>0,76%</td><td>2,05x</td><td><span class="ruido">1 em 2, pode ser sorte</span></td><td>dentro do ruído</td></tr>
+<tr><td>Google Ads</td><td>0,48%</td><td>1,41%</td><td>2,95x</td><td><span class="ruido">1 em 11, pode ser sorte</span></td><td>dentro do ruído</td></tr>
+<tr><td>TOP50 · FRIO</td><td>0,35%</td><td>0,88%</td><td>2,55x</td><td><span class="ruido">1 em 1, pode ser sorte</span></td><td>dentro do ruído</td></tr>
+<tr><td>Lead · FRIO</td><td>0,18%</td><td>0,33%</td><td>1,80x</td><td><span class="ruido">1 em 2, pode ser sorte</span></td><td>dentro do ruído</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Dentro da mesma campanha, este lançamento não distingue criativo por conversão.</b> No HQLB quente o intervalo do melhor contra o pior vai de 0,53x a 6,24x: cabe tudo ali dentro. Só o Google chega perto.</p>
+<p><b>Isso não desmente a alavanca de 2,1x do criativo</b>, que vem de 534 unidades em 26 lançamentos. Diz outra coisa: <b>um lançamento sozinho não tem tamanho para medir criativo por conversão</b>, e é por isso que a fórmula do teto pesa o histórico de cada criativo. A leitura do DEV21 sobre criativo é de <b>alocação de verba e custo por lead</b>, não de conversão.</p>` },
+    { title:"A campanha de Lead recebeu os melhores criativos e ainda assim perdeu dinheiro",
+      sub:"Aqui \"histórico do criativo\" quer dizer quantos leads aquele anúncio já tinha acumulado nos 26 lançamentos anteriores, o currículo dele. Não tem relação com o volume que ele trouxe no DEV21.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>&nbsp;</th><th>Campanha de <b>Lead</b></th><th>Campanhas de <b>modelo</b></th></tr></thead><tbody>
+<tr><td>Currículo do criativo (leads acumulados antes do DEV21)</td><td class="pos"><b>38.101</b></td><td>808</td></tr>
+<tr><td>Nota histórica desse currículo</td><td class="pos"><b>1,05</b>, na média</td><td>0,61, abaixo da média</td></tr>
+<tr><td>CPL pago</td><td class="pos"><b>R$ 4,62</b>, o mais barato do lançamento</td><td>R$ 6,07 a R$ 9,08</td></tr>
+<tr><td>Leads entregues no fundo da régua (D1-D2)</td><td class="neg"><b>24,1%</b></td><td>5,4%</td></tr>
+<tr><td>Leads entregues no topo (D9-D10)</td><td class="neg">14,8%</td><td class="pos"><b>35,3%</b></td></tr>
+<tr class="ag"><td>Resultado</td><td class="neg"><b>ROAS 0,89 · prejuízo de R$ 813</b></td><td class="pos"><b>ROAS 1,90</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Os três anúncios que rodaram na campanha de Lead são os de maior currículo do lançamento inteiro</b>, com 42.180, 38.101 e 28.634 leads de passado. A qualidade desse passado, medida pela nota histórica (quanto o anúncio converte contra a média dos lançamentos em que rodou, onde 1,00 é a média), foi de <b>1,06</b> ponderada pelo gasto: um baralho na média, não acima dela. Já as campanhas de modelo rodaram um baralho claramente pior: nota ponderada de <b>0,64</b>.</p>
+<p><b>É por isso que o argumento fecha nas duas direções.</b> A campanha de Lead perdeu dinheiro com criativos na média e com o lead mais barato do lançamento: preço a favor, criativo neutro, e ainda assim ROAS 0,89. As campanhas de modelo entregaram ROAS 1,90 carregando criativos <b>65% piores</b> que os do Lead pela nota histórica. A vitória delas não veio do criativo, e a derrota do Lead não veio nem do criativo nem do preço. O que sobrou de diferente é <b>para quem a Meta entregou os anúncios</b>.</p>
+<p><b>Uma ressalva honesta:</b> nenhum dos três criativos do Lead rodou em qualquer outra campanha, então não dá para parear o mesmo anúncio entre a campanha de Lead e as de modelo. Mas o desequilíbrio pende para o lado do Lead, ou seja, contra a conclusão, o que só a deixa mais segura.</p>` },
+    { title:"As duas variáveis juntas",
+      sub:"O mesmo teste de separação, agora com o criativo mantido fixo: só leads que vieram do mesmo anúncio são comparados entre si. Se o lift sobreviver aqui, ele não é criativo disfarçado.",
+      html:`<h4 class="bl">Champion abr_28 <span>cobre 24.047 leads da base cheia</span></h4>
+<div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>Leads</th><th>% no D1-D2</th><th>Conv do fundo</th><th>% no D9-D10</th><th>Alunos no topo</th><th>Conv do topo</th><th>Conv do resto</th><th>Lift vs resto</th><th>Lift vs fundo</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td>AD0150-AD07</td><td>8.620</td><td>5,7%</td><td>0,204%</td><td>31,2%</td><td><b>24</b></td><td>0,893%</td><td>0,775%</td><td><b>1,15x</b><br><span class="ic">0,70 a 1,88</span></td><td>4,38x</td><td><span class="ruido">1 em 14, pode ser sorte</span></td></tr>
+<tr><td>AD0150-AD02</td><td>3.885</td><td>6,4%</td><td>0,403%</td><td>31,1%</td><td><b>7</b></td><td>0,580%</td><td>0,784%</td><td><b>0,74x</b><br><span class="ic">0,32 a 1,74</span></td><td>1,44x</td><td><span class="ruido">1 em 1, pode ser sorte</span></td></tr>
+<tr><td>AD0160-AD08</td><td>3.705</td><td>2,9%</td><td>0,935%</td><td>40,4%</td><td><b>17</b></td><td>1,136%</td><td>0,679%</td><td><b>1,67x</b><br><span class="ic">0,84 a 3,34</span></td><td>1,22x</td><td><span class="ruido">1 em 15, pode ser sorte</span></td></tr>
+<tr><td>[G] AD0140-V0-PODCAST</td><td>1.677</td><td>6,4%</td><td>0,000%</td><td>36,0%</td><td><b>4</b></td><td>0,662%</td><td>0,746%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 4, pode ser sorte</span></td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>884</td><td>10,9%</td><td>1,042%</td><td>29,9%</td><td><b>7</b></td><td>2,652%</td><td>0,968%</td><td><b>2,74x</b><br><span class="ic">0,93 a 8,08</span></td><td>2,55x</td><td><span class="ruido">1 em 7, pode ser sorte</span></td></tr>
+<tr><td>AD0150-AD01</td><td>749</td><td>4,4%</td><td>0,000%</td><td>34,2%</td><td><b>4</b></td><td>1,562%</td><td>0,811%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 6, pode ser sorte</span></td></tr>
+<tr><td>AD0160 - VID - CAPTAÇÃO</td><td>550</td><td>21,1%</td><td>0,862%</td><td>16,5%</td><td><b>1</b></td><td>1,099%</td><td>0,218%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 1, pode ser sorte</span></td></tr>
+<tr><td>AD0160-AD11</td><td>531</td><td>3,6%</td><td>0,000%</td><td>29,4%</td><td><b>2</b></td><td>1,282%</td><td>0,267%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 5, pode ser sorte</span></td></tr>
+<tr><td>AD0150-V0 · pagando p/ aprender</td><td>464</td><td>34,7%</td><td>0,000%</td><td>4,7%</td><td><b>0</b></td><td>0,000%</td><td>0,226%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 2, pode ser sorte</span></td></tr>
+<tr class=ag><td>TODOS (agregado)</td><td>22.502</td><td>6,8%</td><td>0,329%</td><td>32,2%</td><td><b>71</b></td><td>0,980%</td><td>0,727%</td><td><b>1,35x</b><br><span class="ic">1,00 a 1,81</span></td><td>2,98x</td><td><b class="ok">1 em 5.890</b></td></tr>
+</tbody></table></div>
+<h4 class="bl" style="margin-top:22px">Challenger jul_24 <span>cobre 16.509 leads (entrou em 25/07)</span></h4>
+<div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>Leads</th><th>% no D1-D2</th><th>Conv do fundo</th><th>% no D9-D10</th><th>Alunos no topo</th><th>Conv do topo</th><th>Conv do resto</th><th>Lift vs resto</th><th>Lift vs fundo</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td>AD0150-AD07</td><td>5.848</td><td>8,5%</td><td>0,404%</td><td>33,9%</td><td><b>18</b></td><td>0,908%</td><td>0,776%</td><td><b>1,17x</b><br><span class="ic">0,65 a 2,09</span></td><td>2,25x</td><td><span class="ruido">1 em 6, pode ser sorte</span></td></tr>
+<tr><td>AD0160-AD08</td><td>3.703</td><td>3,5%</td><td>0,775%</td><td>44,4%</td><td><b>20</b></td><td>1,217%</td><td>0,583%</td><td><b>2,09x</b><br><span class="ic">1,02 a 4,26</span></td><td>1,57x</td><td><b class="ok">1 em 46</b></td></tr>
+<tr><td>AD0150-AD02</td><td>2.630</td><td>11,8%</td><td>0,322%</td><td>32,2%</td><td><b>7</b></td><td>0,826%</td><td>0,897%</td><td><b>0,92x</b><br><span class="ic">0,38 a 2,23</span></td><td>2,57x</td><td><span class="ruido">1 em 2, pode ser sorte</span></td></tr>
+<tr><td>[G] AD0140-V0-PODCAST</td><td>895</td><td>9,5%</td><td>0,000%</td><td>28,3%</td><td><b>1</b></td><td>0,395%</td><td>0,779%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 1, pode ser sorte</span></td></tr>
+<tr><td>AD0150-AD01</td><td>670</td><td>10,7%</td><td>0,000%</td><td>32,2%</td><td><b>6</b></td><td>2,778%</td><td>0,441%</td><td><b>6,31x</b><br><span class="ic">1,28 a 30,99</span></td><td>&gt;0,67x</td><td><b class="ok">1 em 49</b></td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elaborada-…</td><td>533</td><td>15,6%</td><td>0,000%</td><td>26,1%</td><td><b>2</b></td><td>1,439%</td><td>1,777%</td><td><span class="ruido">poucos alunos</span></td><td>-</td><td><span class="ruido">1 em 4, pode ser sorte</span></td></tr>
+<tr class=ag><td>TODOS (agregado)</td><td>15.243</td><td>9,1%</td><td>0,359%</td><td>34,5%</td><td><b>57</b></td><td>1,084%</td><td>0,791%</td><td><b>1,37x</b><br><span class="ic">0,98 a 1,92</span></td><td>3,02x</td><td><b class="ok">1 em 4.385</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Os dois modelos sobrevivem ao teste, e com quase o mesmo número.</b> Champion 1,35x e Challenger 1,37x, ambos com chance de ser sorte abaixo de 1 em 4 mil. Segurando a campanha fixa em vez do criativo, o Champion dava 1,27x.</p>
+<p><b>Isso elimina a explicação alternativa.</b> A separação que o modelo mostra não é efeito do criativo nem da campanha, porque sobrevive a fixar os dois, por caminhos independentes.</p>` },
+    { title:"O teste final: o teto funcionou?",
+      sub:"O teto é a métrica que junta as duas variáveis numa só nota: qualidade do lead (a mistura de decis do modelo) e qualidade do criativo (o histórico dele). A pergunta é direta: quem pagou abaixo do teto rendeu mais do que quem pagou acima?",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Recorte</th><th>Unidades dentro / acima</th><th>Verba dentro / acima</th>
+<th>% bateram ROAS 2</th><th>acima</th><th>ROAS médio</th><th>acima</th><th>Razão</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td>Todas as unidades</td><td>14 / 11</td><td>R$ 107.541 / R$ 53.044</td><td class="pos"><b>64%</b></td><td class="neg">9%</td><td class="pos"><b>2,19</b></td><td class="neg">1,26</td><td><b>1,73x</b></td><td><b class="ok">p=0,012</b><br><span class="ic">Mann-Whitney 0,011</span></td></tr>
+<tr><td>Sem o público quente</td><td>10 / 11</td><td>R$ 49.832 / R$ 53.044</td><td class="pos"><b>60%</b></td><td class="neg">9%</td><td class="pos"><b>2,07</b></td><td class="neg">1,26</td><td><b>1,64x</b></td><td><b class="ok">p=0,024</b><br><span class="ic">Mann-Whitney 0,049</span></td></tr>
+<tr><td>Só o público quente</td><td>4 / 0</td><td>R$ 57.709</td><td colspan=6 class="z">as 4 unidades ficaram <b>dentro</b> do teto: não há grupo acima para comparar</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>Sim, funcionou, e nos dois recortes.</b> Quem pagou dentro do teto entregou ROAS <b>2,19</b> contra <b>1,26</b> de quem pagou acima, com <b>64% contra 9%</b> de unidades batendo a meta. São 25 unidades cobrindo <b>92,9% da verba do lançamento</b>.</p>
+<p><b>E não é o público quente carregando.</b> Tirando o quente inteiro, a separação continua em <b>1,64x</b> e segue significativa. <b>O quente nunca passou do teto</b>: as quatro unidades dele ficaram todas abaixo, o que é o motivo de aquela linha não ter comparação.</p>
+<p><b>O que entrou no cálculo, e o que ficou de fora.</b> O mapa de decis, o valor por venda e o fator de rastreamento vêm da referência congelada na janela que termina em <b>13/07</b>, oito dias antes de a captação começar. O histórico de cada criativo foi fechado em <b>20/07</b>. O lift de plataforma do Google está aplicado. Nada do DEV21 entrou no cálculo do próprio DEV21.</p>` },
+    { title:"Quanto da nota é modelo e quanto é criativo",
+      sub:"A fórmula é conversão do modelo multiplicada pelo ajuste do criativo. O peso do criativo cresce com o passado dele: n dividido por n mais 2.000.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Ingrediente</th><th>Valor</th><th>Leitura</th></tr></thead><tbody>
+<tr><td>Teto médio só com o <b>modelo</b></td><td>R$ 7,85</td><td>é o nível: quem define a ordem de grandeza</td></tr>
+<tr><td>Teto médio já com o <b>criativo</b></td><td>R$ 7,10</td><td>o criativo ajustou o nível em <b>-9,5%</b></td></tr>
+<tr><td>Peso do histórico na fórmula</td><td>45,4%</td><td>ponderado por verba, sobre todas as unidades</td></tr>
+<tr><td>Unidades com peso de 50% ou mais</td><td>11 de 25</td><td>levaram R$ 66.709, 42% da verba</td></tr>
+<tr><td>Criativos estreantes de verdade</td><td>2 de 25</td><td>só esses rodam com nota 100% modelo</td></tr>
+<tr class="ag"><td>Amplitude do ajuste do criativo</td><td>0,74x a 1,31x</td><td>o criativo mexe a nota em até 26% para baixo e 31% para cima</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A divisão de trabalho é clara: o modelo dá o nível, o criativo corrige a margem.</b> Sozinho, o modelo apontaria um teto médio de R$ 7,85; com o criativo, R$ 7,10. O criativo não é passageiro, mas também não é o motorista.</p>
+<p><b>E ele puxou o teto para baixo, não para cima.</b> O lift mediano dos criativos que levaram a verba do DEV21 foi de <b>0,73</b>, e <b>20 dos 23</b> ficaram abaixo de 1. Ou seja: a verba foi para criativos com passado abaixo da média, e o teto reconheceu isso apertando o limite. Foi esse aperto que produziu a separação medida acima.</p>` },
+    { title:"Unidade a unidade, com o veredito de cada uma",
+      sub:"Cada linha é um criativo rodando numa campanha. A coluna do teto aparece duas vezes: como o modelo sozinho diria, e como fica depois do ajuste do criativo.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Criativo</th><th>Campanha</th><th>Gasto R$</th><th>CPL</th>
+<th>Leads de histórico</th><th>Peso</th><th>Lift do criativo</th><th class="sp">Teto só modelo</th><th>Teto final</th><th>Veredito</th><th>ROAS</th><th>Acertou</th></tr></thead><tbody>
+<tr><td>AD0150-AD07</td><td>HQLB · FRIO</td><td>28.916</td><td>6,11</td><td>23.179</td><td>92%</td><td>0,86</td><td class="sp">7,05</td><td><b>6,15</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,03</td><td>✓</td></tr>
+<tr><td>AD0160-AD08</td><td>HQLB · QUENTE</td><td>24.904</td><td>6,85</td><td>1</td><td>0%</td><td>0,00</td><td class="sp">8,20</td><td><b>8,19</b></td><td class="pos"><b>dentro</b></td><td class="neg">1,97</td><td>✗</td></tr>
+<tr><td>AD0150-AD07</td><td>HQLB · QUENTE</td><td>21.514</td><td>5,30</td><td>23.179</td><td>92%</td><td>0,86</td><td class="sp">7,98</td><td><b>6,97</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,43</td><td>✓</td></tr>
+<tr><td>AD0150-AD02</td><td>HQLB · FRIO</td><td>17.543</td><td>7,10</td><td>528</td><td>21%</td><td>0,30</td><td class="sp">6,96</td><td><b>5,95</b></td><td class="neg"><b>acima</b></td><td class="neg">1,30</td><td>✓</td></tr>
+<tr><td>[G] AD0140-V0-PODCAST</td><td>Google Ads</td><td>16.790</td><td>9,02</td><td>960</td><td>32%</td><td>0,48</td><td class="sp">10,05</td><td><b>8,35</b></td><td class="neg"><b>acima</b></td><td class="neg">1,17</td><td>✓</td></tr>
+<tr><td>AD0150-AD02</td><td>HQLB · QUENTE</td><td>9.052</td><td>6,20</td><td>528</td><td>21%</td><td>0,30</td><td class="sp">8,09</td><td><b>6,91</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,71</td><td>✓</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elab…</td><td>Google Ads</td><td>8.010</td><td>8,07</td><td>0</td><td>0%</td><td>-</td><td class="sp">9,24</td><td><b>9,24</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,86</td><td>✓</td></tr>
+<tr><td>AD0160-AD11</td><td>HQLB · FRIO</td><td>5.095</td><td>8,45</td><td>14</td><td>1%</td><td>0,00</td><td class="sp">7,44</td><td><b>7,39</b></td><td class="neg"><b>acima</b></td><td class="neg">0,96</td><td>✓</td></tr>
+<tr><td>AD0150-AD07</td><td>TOP30 · FRIO</td><td>2.611</td><td>5,42</td><td>23.179</td><td>92%</td><td>0,86</td><td class="sp">6,08</td><td><b>5,31</b></td><td class="neg"><b>acima</b></td><td class="pos">3,75</td><td>✗</td></tr>
+<tr><td>AD0160 - VID - CAPTAÇÃO</td><td>Lead · FRIO</td><td>2.490</td><td>4,11</td><td>28.634</td><td>93%</td><td>1,33</td><td class="sp">5,52</td><td><b>7,22</b></td><td class="pos"><b>dentro</b></td><td class="neg">1,31</td><td>✗</td></tr>
+<tr><td>AD0370-gravadosnosEUA</td><td>HQLB · FRIO</td><td>2.341</td><td>8,67</td><td>8</td><td>0%</td><td>0,00</td><td class="sp">8,76</td><td><b>8,73</b></td><td class="pos"><b>dentro</b></td><td class="neg">0,70</td><td>✗</td></tr>
+<tr><td>AD0150-AD01</td><td>HQLB · QUENTE</td><td>2.239</td><td>6,57</td><td>6.034</td><td>75%</td><td>0,74</td><td class="sp">8,62</td><td><b>6,96</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,92</td><td>✓</td></tr>
+<tr><td>[G] AD0139-V0-PODCAST</td><td>Google Ads</td><td>2.180</td><td>10,43</td><td>502</td><td>20%</td><td>0,46</td><td class="sp">9,95</td><td><b>8,87</b></td><td class="neg"><b>acima</b></td><td class="neg">0,75</td><td>✓</td></tr>
+<tr><td>AD0150-AD07</td><td>TOP50 · FRIO</td><td>2.151</td><td>5,16</td><td>23.179</td><td>92%</td><td>0,86</td><td class="sp">6,09</td><td><b>5,32</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,28</td><td>✓</td></tr>
+<tr><td>AD0150-AD02</td><td>TOP50 · FRIO</td><td>2.044</td><td>7,07</td><td>528</td><td>21%</td><td>0,30</td><td class="sp">5,91</td><td><b>5,05</b></td><td class="neg"><b>acima</b></td><td class="neg">0,80</td><td>✓</td></tr>
+<tr><td>AD0150-V0 · pagando p/ aprender</td><td>Lead · FRIO</td><td>1.947</td><td>3,58</td><td>42.180</td><td>95%</td><td>0,73</td><td class="sp">3,98</td><td><b>2,94</b></td><td class="neg"><b>acima</b></td><td class="neg">0,84</td><td>✓</td></tr>
+<tr><td>AD0150-AD01</td><td>TOP50 · FRIO</td><td>1.739</td><td>7,66</td><td>6.034</td><td>75%</td><td>0,74</td><td class="sp">6,44</td><td><b>5,20</b></td><td class="neg"><b>acima</b></td><td class="neg">1,88</td><td>✓</td></tr>
+<tr><td>AD0160-AD08</td><td>TOP50 · FRIO</td><td>1.677</td><td>4,30</td><td>1</td><td>0%</td><td>0,00</td><td class="sp">7,26</td><td><b>7,26</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,92</td><td>✓</td></tr>
+<tr><td>AD0150-AD01</td><td>HQLB · FRIO</td><td>1.388</td><td>6,97</td><td>6.034</td><td>75%</td><td>0,74</td><td class="sp">7,79</td><td><b>6,29</b></td><td class="neg"><b>acima</b></td><td class="neg">0,00</td><td>✓</td></tr>
+<tr><td>[G] AD0150-V13-VÍDEO 03-edição-elab…</td><td>Google Ads</td><td>1.367</td><td>8,44</td><td>0</td><td>0%</td><td>-</td><td class="sp">8,92</td><td><b>8,92</b></td><td class="pos"><b>dentro</b></td><td class="neg">0,00</td><td>✗</td></tr>
+<tr><td>AD0160-AD08</td><td>TOP30 · FRIO</td><td>1.161</td><td>6,24</td><td>1</td><td>0%</td><td>0,00</td><td class="sp">7,69</td><td><b>7,69</b></td><td class="pos"><b>dentro</b></td><td class="neg">1,41</td><td>✗</td></tr>
+<tr><td>[G] AD0149-V0 · pagando p/ aprender</td><td>Google Ads</td><td>998</td><td>8,99</td><td>657</td><td>25%</td><td>1,05</td><td class="sp">10,72</td><td><b>10,86</b></td><td class="pos"><b>dentro</b></td><td class="pos">3,27</td><td>✓</td></tr>
+<tr><td>AD0150-AD07</td><td>TOP10 · FRIO</td><td>994</td><td>6,54</td><td>23.179</td><td>92%</td><td>0,86</td><td class="sp">6,33</td><td><b>5,53</b></td><td class="neg"><b>acima</b></td><td class="neg">1,64</td><td>✓</td></tr>
+<tr><td>AD0027-V0-DEV</td><td>Lead · FRIO</td><td>722</td><td>3,74</td><td>38.101</td><td>95%</td><td>1,05</td><td class="sp">4,65</td><td><b>4,87</b></td><td class="pos"><b>dentro</b></td><td class="pos">2,26</td><td>✓</td></tr>
+<tr><td>AD0150-AD02</td><td>TOP30 · FRIO</td><td>713</td><td>6,99</td><td>528</td><td>21%</td><td>0,30</td><td class="sp">6,13</td><td><b>5,24</b></td><td class="neg"><b>acima</b></td><td class="neg">0,00</td><td>✓</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>19 das 25 unidades foram classificadas corretamente.</b> Os dois maiores gastos do lançamento, o AD0150-AD07 no frio e o AD0160-AD08 no quente, ficaram dentro do teto e entregaram 2,03 e 1,97. O AD0140 do Google, que sozinho consumiu R$ 16.790, foi marcado como caro (CPL R$ 9,02 contra teto de R$ 8,35) e devolveu 1,17.</p>` },
+    { title:"CPL barato prevê lucro?",
+      sub:"Três regras de decisão sobre as mesmas 25 unidades de verba, com a mesma fórmula, o mesmo valor por venda e o mesmo alvo de ROAS 2. A única diferença entre elas é quanta informação cada uma enxerga.",
+      html:`<p style="margin-bottom:14px">Para a comparação ser justa, o corte de \"CPL barato\" não pode ser um número escolhido a dedo. Ele é a <b>mesma conta do teto</b>, só que usando a conversão média do negócio em vez da nota do lead: <b>R$ 6,64</b> para todo mundo, igual. É literalmente o teto de quem não olha o lead nem o criativo.</p>
+<div class="tw"><table class="tb"><thead><tr><th>Regra</th><th>Aprova / reprova</th><th class="sp">Conv aprovada</th><th>Conv reprovada</th><th>Razão</th>
+<th>ROAS aprov. / repr.</th><th>Razão</th><th>Lucro por real</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td><b>CPL barato (teto plano, não olha o lead)</b></td><td>12 / 13</td><td class="sp">0,774%</td><td>0,719%</td><td><b>1,08x</b></td><td>2,27 / 1,54</td><td><b>1,48x</b></td><td>R$ 1,27 / R$ 0,54</td><td><b class="ok">1,5%</b></td></tr>
+<tr><td><b>Teto com o modelo</b></td><td>18 / 7</td><td class="sp">0,789%</td><td>0,543%</td><td><b>1,45x</b></td><td>2,04 / 1,19</td><td><b>1,72x</b></td><td>R$ 1,04 / R$ 0,19</td><td><b class="ok">2,0%</b></td></tr>
+<tr class="ag"><td><b>Teto final: modelo x criativo</b></td><td>14 / 11</td><td class="sp">0,820%</td><td>0,574%</td><td><b>1,43x</b></td><td>2,19 / 1,26</td><td><b>1,73x</b></td><td>R$ 1,19 / R$ 0,26</td><td><b class="ok">1,2%</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>O veredito é em lucro, e ele é este: das 25 unidades, a régua do teto guarda no grupo aprovado 90% do lucro do lançamento; a régua do CPL guarda 68%.</b> Régua de decisão se julga pelo que ela manda cortar: o grupo que a regra do CPL reprova gerou <b>R$ 45.584</b> de lucro (ROAS 1,54, dinheiro bom que seria cortado), enquanto o grupo que o teto reprova gerou R$ 13.938 (ROAS 1,26, perto do peso morto).</p>
+<p><b>E sim, às vezes o lead barato que converte menos compensa. O teto é exatamente a conta de quando compensa.</b> A prova são as duas unidades mais baratas do lançamento, lado a lado, as duas na campanha de Lead: pela régua do CPL, as duas melhores compras do DEV21. O <b>AD0027</b> (CPL R$ 3,74) convertia 32% abaixo da média mas custava 45% menos: o desconto cobre o déficit, e o teto aprovou (valia até R$ 4,87). Devolveu <b>ROAS 2,26</b>. O <b>AD0150-V0</b> (CPL R$ 3,58) convertia 76% abaixo da média e custava só 47% menos: o desconto não cobre, e o teto reprovou (valia até R$ 2,94). Devolveu <b>0,84</b>. O CPL não distingue os dois; o teto distinguiu os dois <b>antes do resultado</b>.</p>
+<p><b>"Ficar abaixo do teto" e "custo por qualificação" são a mesma régua dita de dois jeitos.</b> O teto da unidade é a conversão esperada dela (modelo x criativo) vezes o valor da venda, dividido pelo ROAS alvo. Pagar abaixo do teto é o mesmo que exigir que o <b>custo por venda esperada</b> fique abaixo de R$ 817, que é metade dos R$ 1.634 que a venda vale com o fator de rastreamento. CPL barato exige preço baixo em absoluto; o teto exige preço baixo <b>em relação ao que aquele lead vale</b>.</p>
+<p><b>Por que a régua do CPL erra: ela não enxerga qualidade.</b> Ela aprova leads que convertem 0,774% e reprova leads que convertem 0,719%, a mesma coisa. As regras de teto aprovam leads que convertem <b>43% mais</b> que os que reprovam. O ganho de ROAS que a regra do CPL ainda assim mostra é em parte aritmético, porque o CPL é o denominador do próprio ROAS, e o número acima mostra o que sobra dele: um corte que joga fora R$ 45.584 de lucro para se proteger de pouco.</p>
+<p><b>Sem corte nenhum a conclusão é a mesma.</b> Ordenando as 25 unidades pelo CPL puro, a concordância com o ROAS é de -0,37 numa régua de menos um a mais um, com 6,5% de chance de ser acaso: <b>não passa</b>. Ordenando pela folga contra o teto do modelo, a concordância vai para <b>-0,65</b> com 0,04% de chance de acaso. Dividir todo mundo pelo mesmo teto plano dá exatamente a mesma ordem do CPL puro, o que é a prova de que os dois são a mesma regra.</p>
+<h4 class="cap">Por que a campanha rendeu o que rendeu: qualidade dividida por preço</h4>
+<p style="margin-bottom:12px">O ROAS de uma campanha contra o do lançamento se abre em exatamente dois fatores que se multiplicam: a conversão dela sobre a geral (<b>qualidade</b>) e o CPL geral sobre o dela (<b>preço</b>). Referência do lançamento: conversão 0,759%, CPL R$ 6,76.</p>
+<div class="tw"><table class="tb"><thead><tr><th>Campanha</th><th>ROAS</th><th>vs referência</th><th>Qualidade</th><th>Preço</th><th>Lucro</th></tr></thead><tbody>
+<tr><td>HQLB · QUENTE</td><td>1,97</td><td>1,28</td><td class="pos"><b>1,14</b></td><td class="pos"><b>1,11</b></td><td class="pos">R$ 55.998</td></tr>
+<tr><td>HQLB · FRIO</td><td>1,29</td><td>0,84</td><td class="neg"><b>0,88</b></td><td class="neg"><b>0,95</b></td><td class="pos">R$ 17.654</td></tr>
+<tr><td>Google Ads</td><td>1,30</td><td>0,85</td><td class="pos"><b>1,15</b></td><td class="neg"><b>0,75</b></td><td class="pos">R$ 9.550</td></tr>
+<tr><td>TOP30 · FRIO</td><td>2,48</td><td>1,62</td><td class="pos"><b>1,41</b></td><td class="pos"><b>1,11</b></td><td class="pos">R$ 7.541</td></tr>
+<tr><td>TOP50 · FRIO</td><td>1,40</td><td>0,91</td><td class="neg"><b>0,89</b></td><td class="pos"><b>1,17</b></td><td class="pos">R$ 3.085</td></tr>
+<tr><td>TOP10 · FRIO</td><td>0,61</td><td>0,40</td><td class="neg"><b>0,50</b></td><td class="neg"><b>0,88</b></td><td class="neg">-R$ 779</td></tr>
+<tr><td>Lead · FRIO</td><td>0,89</td><td>0,58</td><td class="neg"><b>0,43</b></td><td class="pos"><b>1,46</b></td><td class="neg">-R$ 813</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A última linha responde a pergunta do título sozinha.</b> A campanha de Lead teve o <b>melhor preço do lançamento</b>, 46% abaixo da média, e mesmo assim perdeu dinheiro, porque a qualidade foi 0,43. O Google é o espelho: a segunda melhor qualidade do lançamento (1,15), estragada por um preço 25% pior que a média.</p>
+<h4 class="cap">O quadrante que decide a troca de métrica</h4>
+<div class="tw"><table class="tb"><thead><tr><th>Quadrante</th><th>Unidades</th><th>Verba</th><th>Conversão</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody>
+<tr><td>CPL barato · dentro do teto</td><td>8</td><td>R$ 67.683</td><td>0,772%</td><td class="pos">2,24</td><td>R$ 84.252</td></tr>
+<tr><td>CPL barato · acima do teto</td><td>2</td><td>R$ 4.558</td><td>0,682%</td><td>2,51</td><td>R$ 6.878</td></tr>
+<tr class="ag"><td><b>CPL caro · dentro do teto</b></td><td><b>6</b></td><td><b>R$ 39.859</b></td><td><b>0,925%</b></td><td class="pos"><b>2,09</b></td><td class="pos"><b>R$ 43.460</b></td></tr>
+<tr><td>CPL caro · acima do teto</td><td>9</td><td>R$ 48.486</td><td class="neg">0,556%</td><td class="neg">1,15</td><td>R$ 7.060</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A linha destacada é o motivo de trocar de métrica.</b> São 6 unidades com CPL acima da média, que qualquer régua de CPL teria marcado como caras, e que entregaram ROAS <b>2,09</b> e <b>R$ 43.460</b> de lucro. Elas eram caras porque o lead valia o preço. Dentro do grupo de CPL caro o teto separa 1,82x, com 4,4% de chance de ser sorte.</p>
+<p><b>Sobre o pedaço do criativo, uma ressalva de tamanho de amostra.</b> As regras 2 e 3 dão o <b>mesmo veredito em 21 das 25 unidades</b> e discordam em 4. Com quatro unidades de diferença nenhum teste decide se o ajuste do criativo melhora ou não a previsão. Este lançamento <b>não tem tamanho para responder isso</b>, e por isso ele não confirma nem contradiz os testes do projeto que mediram o criativo lead a lead, em 26 lançamentos, onde ele ganha com folga.</p>` },
+    { title:"O próximo passo do score, já validado: a nota do criativo dentro dele",
+      sub:"Hoje o criativo só ajusta o teto de CPL. O passo seguinte, já medido em base própria e ainda não aplicado, é a nota histórica do criativo multiplicar o próprio score que vai para a Meta.",
+      html:`<p style="margin-bottom:12px">O teste: 63.544 leads pontuados pelo abr_28 entre 25/05 e 03/08, 314 compradores, 30 criativos. A nota de cada criativo foi recalculada semana a semana usando só o passado dele, nada do futuro. Quatro versões do score, mesma população, mesma régua:</p>
+<div class="tw"><table class="tb"><thead><tr><th>Versão do score</th><th>Acerto de ordenação (AUC)</th><th>Lift do D10</th><th>Compradores no top 10%</th></tr></thead><tbody>
+<tr><td>Só a nota do criativo</td><td>0,612</td><td>1,43x</td><td>41</td></tr>
+<tr><td>Só o modelo (abr_28), o que roda hoje</td><td>0,640</td><td>1,69x</td><td>67</td></tr>
+<tr class="ag"><td><b>Modelo x nota do criativo</b></td><td><b>0,677</b></td><td><b>2,42x</b></td><td><b>76</b></td></tr>
+<tr><td>Modelo x nota x fala do vídeo</td><td>0,681</td><td class="pos"><b>2,93x</b></td><td class="pos"><b>92</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A régua da tabela:</b> o acerto de ordenação é a chance de o score pôr um comprador acima de um não-comprador num par sorteado (0,5 = moeda, 1,0 = perfeito). O lift do D10 é quanto o decil de cima converte contra a média. E a última coluna é a mais concreta: na mesma fatia de 10% do tráfego, o score composto encontra <b>76 compradores onde o modelo sozinho encontra 67</b>; com a fala do vídeo, <b>92</b>.</p>
+<p><b>O ganho não é sorte de uma amostra.</b> Reamostrando por criativo inteiro 400 vezes (o jeito honesto, porque lead do mesmo criativo não é observação independente), o composto ganha do modelo sozinho em <b>100% das reamostras</b>. Numa segunda base, com a nota separada por canal, o ganho se repete com intervalo que não toca o zero.</p>
+<p><b>Status: validado offline, não aplicado.</b> O destino desenhado é entrar como <b>desafiante</b> do score que vai para a Meta, com backtest walk-forward antes de encostar em produção. É o item "a aplicar" da troca de métrica: o teto já usa o criativo na régua de preço; isto o coloca na régua de público.</p>` },
+    { title:"As próximas alavancas já medidas",
+      sub:"Nada nesta seção é resultado do DEV21: são os dois sinais já validados em base própria que ainda não entraram em produção. O primeiro responde 'se o criativo importa, dá para saber antes de gastar?'. O segundo é um comportamento do lead que o modelo comprovadamente não enxerga.",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Sinal</th><th>O que é</th><th>Separação topo/base</th><th>Concordância</th><th>Chance de ser sorte</th></tr></thead><tbody>
+<tr><td><b>Fala do vídeo</b></td><td>a transcrição do que é dito no anúncio</td><td><b>1,95x</b></td><td>+0,40</td><td class="ok"><b>0,31%</b></td></tr>
+<tr><td><b>Ritmo de fala</b></td><td>palavras divididas pela duração</td><td><b>1,94x</b></td><td>+0,42</td><td class="ok"><b>~0%</b></td></tr>
+<tr class="ag"><td><b>Os dois juntos</b></td><td>a média das duas ordens</td><td class="pos"><b>2,70x</b></td><td><b>+0,55</b></td><td class="ok"><b>0,00%</b></td></tr>
+</tbody></table></div>
+<p style="margin-top:14px">Base: 65 vídeos distintos, 4.126 compradores. A concordância está numa régua de menos um a mais um, onde zero é fila embaralhada e um é a mesma fila.</p>
+<p><b>O ritmo em caixa, que é o achado mais barato do projeto:</b> o terço de vídeos mais lentos fala 3,28 palavras por segundo e converte <b>0,69%</b>. O terço mais rápido fala 3,98 e converte <b>1,12%</b>. Um número só, sem nenhum processamento de linguagem, e vale quase o mesmo que a análise completa do texto.</p>
+<p><b>E os dois não são a mesma coisa medida duas vezes.</b> A concordância entre eles é de apenas +0,10, com 44% de chance de ser acaso, ou seja, medem coisas diferentes. É por isso que juntá-los sobe para 2,70x em vez de empatar.</p>
+<p><b>Três ressalvas que precisam viajar junto com esses números.</b> Primeira: o gancho, ou seja, só as primeiras palavras do vídeo, foi <b>testado e não é melhor</b> que o vídeo inteiro. Segunda: a duração inclui silêncio e trilha, então \"ritmo\" pode estar medindo quanto do vídeo é fala, e não velocidade de fala. Terceira, a mais importante: o papel disto é dar um <b>palpite inicial para criativo estreante</b>, quando ainda não há histórico próprio. Onde o anúncio já tem passado, o histórico manda e o texto empata com ele.</p>
+<p><b>E uma pergunta aberta que esses números sugerem.</b> Até aqui a fala do vídeo foi medida contra uma coisa só: a conversão do anúncio. Mas se o texto prevê o que o anúncio rende, ele pode prever também <b>quem</b> o anúncio atrai: a mistura de decis, as respostas do formulário, o perfil do lead. Ainda não medimos isso. Se a resposta for sim, o texto vira alavanca dupla: escolhe o vídeo antes de gastar e antecipa a qualidade do público que ele vai trazer.</p>
+<h4 class="cap">A segunda alavanca: entrar no grupo de WhatsApp</h4>
+<div class="tw"><table class="tb"><thead><tr><th>Medida</th><th>Valor</th><th>Leitura</th></tr></thead><tbody>
+<tr><td>Conversão de quem <b>entrou</b> no grupo</td><td><b>0,69%</b></td><td rowspan="2">separação de <b>3,2x</b>, medida em 8 lançamentos, ~100 mil leads</td></tr>
+<tr><td>Conversão de quem <b>não entrou</b></td><td class="neg">0,22%</td></tr>
+<tr class="ag"><td>O teste que importa: dentro do <b>mesmo decil</b></td><td><b>~3x em todos</b></td><td>no D10: 1,03% contra 0,34%. O sinal sobrevive a segurar a nota do modelo fixa</td></tr>
+<tr><td>Quantos respondentes entram no grupo</td><td>~65%</td><td>sinal frequente, não raridade</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A linha destacada é o motivo de isto estar aqui.</b> Um sinal novo só vale alguma coisa se disser algo que o modelo ainda não sabe. Segurando o decil fixo, quem entrou no grupo converte cerca de <b>3 vezes</b> quem não entrou, em <b>todos</b> os decis. Ou seja: é informação que o formulário não carrega e o modelo não captura. É comportamento, não declaração.</p>
+<p><b>Onde isso está hoje.</b> A coleta está no ar desde <b>10/06</b>, gravando cada entrada de grupo em tabela própria, porque a ferramenta do cliente apaga o histórico em 90 dias: sem a coleta, cada lançamento não capturado sumiria para sempre. O que falta é honesto: o ganho <b>dentro do modelo</b> ainda não foi provado, porque o teste disponível tinha só 44 conversões na fatia de avaliação, pouco para decidir. A feature entra em avaliação no próximo retreino, quando houver lançamentos cobertos o bastante.</p>
+<h4 class="cap">A terceira, ainda teórica: a página de captura</h4>
+<p><b>Esta não tem dado nenhum, e entra como proposta.</b> O raciocínio é o do texto do anúncio, um passo adiante no funil: entre o clique e o formulário existe a página, e o que ela diz pode mexer tanto em <b>quantos</b> leads entram quanto em <b>quem</b> entra. Hoje a página está fora de tudo o que medimos. Se o estudo valer a pena, começa como o do vídeo começou: versões registradas, leads casados por origem, conversão por versão.</p>` },
+    { title:"Metodologia e reprodução",
+      sub:"De onde veio cada número. O documento completo, com os scripts copiados e as fórmulas, vive no repositório em V2/docs/relatorios/dev21_modelo_criativo_teto/ (METODOLOGIA.md).",
+      html:`<div class="tw"><table class="tb"><thead><tr><th>Bloco</th><th>Fonte de dados</th><th>Universo</th><th>Script</th></tr></thead><tbody>
+<tr><td>Negócio por campanha (1-6)</td><td>Railway Client x UTMTracking + analytics.sales + ad_spend</td><td>27.317 cadastros, last-touch por email</td><td>painel_dev21.py</td></tr>
+<tr><td>Separação do modelo (7-9, 16)</td><td>registros_ml (decil dos 2 modelos) + sales</td><td>24.158 respondentes; abr_28 cobre 24.047, jul_24 16.509</td><td>modelo_dev21.py + separacao.py</td></tr>
+<tr><td>Dinheiro por decil (10)</td><td>as mesmas bases, custo = CPL da unidade criativo x campanha</td><td>25.562 leads pagos (93,6%)</td><td>lacunas.py</td></tr>
+<tr><td>Série histórica fria (11)</td><td>registros_ml com o decil do abr_28 lido das DUAS colunas + launch_calendar</td><td>60.712 leads frios, LF56 a DEV21</td><td>historico_frio2.py</td></tr>
+<tr><td>Criativo (12-15)</td><td>utm_content + ad_insights (Meta, por anúncio) + Google Ads API</td><td>276 unidades criativo x campanha</td><td>criativo_dev21.py e irmãos</td></tr>
+<tr><td>Backtest do teto (17-19)</td><td>reference_rolling congelada em 13/07 + captacoes até 20/07</td><td>25 unidades (100+ leads, R$ 300+), 92,9% da verba</td><td>teto_v2.py</td></tr>
+<tr><td>Corrida CPL vs teto (20)</td><td>derivada do backtest; teto plano = mesma fórmula com a conversão geral</td><td>as mesmas 25 unidades</td><td>corrida2.py + lacunas2.py</td></tr>
+<tr><td>Score composto e alavancas (21-22)</td><td>registros da memória do projeto (não recalculados aqui)</td><td>63.544 leads (composto); 65 vídeos (texto); ~100 mil (grupo)</td><td>sessões de 05/08 e 09/06</td></tr>
+</tbody></table></div>
+<p style="margin-top:14px"><b>A régua de negócio, idêntica ao debriefing do cliente:</b> só produto principal (sem Operação 50k e sem MBA), três devoluções removidas, combos à parte, boleto a 50% no faturamento, gasto da Meta com 13% de imposto e Google sem. Captação 21/07 a 03/08, vendas 10 a 16/08, casamento lead-venda por email, telefone e últimos 6 dígitos.</p>
+<p><b>As três regras de honestidade que valem para o relatório inteiro.</b> Primeira: nada do DEV21 entra no cálculo que julga o DEV21 (a referência do teto congela em 13/07 e o histórico de criativo fecha em 20/07). Segunda: o decil histórico do abr_28 é lido de onde ele estiver gravado, porque o carimbo de papel no banco só vale a partir de 25/07, e o papel real veio da verba na Meta desde 22/06. Terceira: criativo casa por grafia canônica (acento, caixa, espaço e carimbo do Google unificados), correção que entrou em produção no PR #237.</p>
+<p><b>Para reproduzir ou atualizar:</b> os 18 scripts estão copiados em <b>V2/docs/relatorios/dev21_modelo_criativo_teto/scripts/</b>, com a ordem de execução, as dependências entre eles e as armadilhas conhecidas documentadas no METODOLOGIA.md ao lado. A única edição necessária é apontar a constante S de cada script para um diretório de trabalho novo. O snapshot desta página está congelado na mesma pasta.</p>` },
+    { title:"Como ler, e as limitações consolidadas",
+      sub:"A régua de negócio que o painel inteiro segue, e a lista única do que limita cada leitura.",
+      html:`<p><b>A régua é a do cliente.</b> Só produto principal, sem Operação 50k e sem MBA. O boleto conta a 50% no faturamento porque parte não se realiza, e o gasto da Meta entra com 13% de imposto (o do Google não).</p>
+<p><b>As três devoluções saíram.</b> São quatro transações do Guru, todas do FullStack Pro OFICIAL, de três pessoas, somando R$ 8.788,48. Elas estavam gravadas na nossa base e foram removidas aqui. Nenhuma das outras quatro plataformas teve devolução no período.</p>
+<p><b>Orgânico e "não está na base" não têm ROAS.</b> Não existe mídia comprada para eles, então dividir por zero não diz nada. O orgânico, ainda assim, é o de melhor conversão do lançamento.</p>
+<p><b>Uma limitação de atribuição que continua.</b> A base de cadastros guarda origem e campanha, mas não o campo que identifica a campanha do Google, então parte do Google entra pelo agregado e não por campanha individual.</p>
+<h4 class="cap">As limitações, consolidadas</h4>
+<div class="tw"><table class="tb"><thead><tr><th>#</th><th>Limitação</th><th>Onde pesa</th></tr></thead><tbody>
+<tr><td>1</td><td><b>37 alunos sem origem identificada</b> (o debriefing do gestor deixa 80). É o teto do que dá para atribuir com email + telefone.</td><td>Todas as contas por campanha</td></tr>
+<tr><td>2</td><td>A base de cadastros <b>não guarda o campo da campanha do Google</b>, então parte do Google entra pelo agregado, não por campanha individual.</td><td>Seções de campanha e de criativo</td></tr>
+<tr><td>3</td><td>O modelo prevê <b>quem</b> compra, não <b>quanto</b>: o ticket é plano do fundo ao topo da régua.</td><td>"O que a régua valeu em dinheiro"</td></tr>
+<tr><td>4</td><td><b>Neste lançamento</b> o topo andou em platô: D7-D8 (1,003%) empatou com D9-D10 (0,980%), nas duas réguas. Na referência histórica que o teto usa (86 mil leads) o degrau existe: D9-D10 converte <b>1,407%</b> contra 0,934% do D7-D8, um degrau de 1,5x. O platô é deste lançamento, não da régua.</td><td>"O que a régua valeu em dinheiro"</td></tr>
+<tr><td>5</td><td>No <b>HQLB frio deste lançamento o ranking não separou</b> (1,12x). É o pior ponto de uma série que fecha positiva em 9 de 9; pede vigilância, não conclusão.</td><td>"Separar não é a mesma coisa que dar lucro"</td></tr>
+<tr><td>6</td><td>Dentro de um lançamento só, <b>criativo não se distingue por conversão</b> (melhor contra pior cabe entre 0,53x e 6,24x). A prova do criativo vem dos 26 lançamentos.</td><td>"O criativo mexeu a conversão?"</td></tr>
+<tr><td>7</td><td>O backtest do teto tem <b>25 unidades</b>: dá para provar que o teto separa, não dá para decidir se o ajuste do criativo melhora a previsão aqui (21 de 25 vereditos iguais).</td><td>"O teste final" e "CPL barato prevê lucro?"</td></tr>
+<tr><td>8</td><td>Cobertura das réguas: o abr_28 pontua <b>24.047</b> dos 27.317 leads; o jul_24, 16.509 (entrou em 25/07). O resto fica fora das contas por decil.</td><td>Seções do modelo</td></tr>
+<tr><td>9</td><td>Vendas contadas na janela de <b>10 a 16/08</b> (com 3 dias de casamento). Compra tardia depois disso não está aqui.</td><td>Faturamento, ROAS e lucro</td></tr>
+<tr><td>10</td><td>As alavancas novas (fala do vídeo, ritmo, grupo de WhatsApp, score composto) estão <b>validadas offline e nenhuma em produção</b>; o ganho do grupo dentro do modelo ainda não tem poder estatístico (44 conversões).</td><td>"As próximas alavancas" e "O próximo passo do score"</td></tr>
+</tbody></table></div>` }
+  ]
+};
+
+/* ==== runtime (não precisa mexer) ==== */
+const SVGNS="http://www.w3.org/2000/svg";
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const col=c=>!c?"var(--c1)":(c[0]==="#"?c:`var(--${c})`);
+const svg=(w,h)=>{const s=document.createElementNS(SVGNS,"svg");s.setAttribute("viewBox",`0 0 ${w} ${h}`);s.setAttribute("role","img");return s;};
+const A=(p,t,at)=>{const e=document.createElementNS(SVGNS,t);for(const k in at)e.setAttribute(k,at[k]);p.appendChild(e);return e;};
+const T=(p,x,y,cls,s,anc="middle")=>{const t=A(p,"text",{x,y,class:cls,"text-anchor":anc});t.textContent=s;return t;};
+const tip=document.getElementById("tip");
+const hov=(e,html)=>{e.addEventListener("mousemove",ev=>{tip.innerHTML=html;tip.style.opacity=1;tip.style.left=ev.clientX+"px";tip.style.top=ev.clientY+"px";});e.addEventListener("mouseleave",()=>tip.style.opacity=0);};
+const fmt=(v,ch)=>{const d=ch.dec??(ch.unit==="%"?1:0);return (ch.unit==="R$"?"R$":"")+(+v).toFixed(d)+(ch.unit==="%"?"%":"");};
+const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$":"")+v;
+function scale(maxv){let ym=maxv*1.14;const steps=[1,2,5,10,20,25,50,100,200,500,1000];let st=steps.find(s=>ym/s<=5)||1000;ym=Math.ceil(ym/st)*st;const t=[];for(let v=0;v<=ym+1e-6;v+=st)t.push(+v.toFixed(6));return{ym,t};}
+const W=760,H=360,M={t:26,r:14,b:42,l:46},PW=W-M.l-M.r,PH=H-M.t-M.b;
+function axis(s,ym,ticks,ch){const y=v=>M.t+PH*(1-v/ym);ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
+function whisker(s,cx,yt,yb,cap){A(s,"line",{x1:cx,x2:cx,y1:yt,y2:yb,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yt,y2:yt,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yb,y2:yb,class:"whisk"});}
+
+function bars(host,ch){
+  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const slot=PW/ch.data.length,bw=Math.min(46,slot*0.5);
+  ch.data.forEach((d,i)=>{const cx=M.l+slot*(i+.5);
+    const r=A(s,"rect",{x:cx-bw/2,y:y(d.mean),width:bw,height:Math.max(0,M.t+PH-y(d.mean)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
+    hov(r,`<b>${d.label}</b> · ${fmt(d.mean,ch)}${d.std!=null?` · σ ±${d.std}`:""}`);
+    if(d.std!=null)whisker(s,cx,y(d.mean+d.std),y(Math.max(0,d.mean-d.std)),6);
+    T(s,cx,y(d.mean+(d.std||0))-7,"vlab",fmt(d.mean,ch));
+    T(s,cx,H-M.b+20,"xlab"+(d.partial?" part":""),d.label);});
+  host.appendChild(s);
+}
+function grouped(host,ch){
+  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const n=ch.series.length,slot=PW/ch.groups.length,bw=Math.min(24,slot*0.7/n),gap=3,span=n*bw+(n-1)*gap;
+  ch.groups.forEach((g,i)=>{const gc=M.l+slot*(i+.5);
+    g.values.forEach((v,j)=>{const cx=gc-span/2+bw/2+j*(bw+gap);
+      const r=A(s,"rect",{x:cx-bw/2,y:y(v.mean),width:bw,height:Math.max(0,M.t+PH-y(v.mean)),rx:4,class:"bar"+(g.partial?" part":""),style:`fill:${col(ch.series[j].color)}`});
+      hov(r,`<b>${g.label}</b> · ${ch.series[j].name} ${fmt(v.mean,ch)}${v.std!=null?` · σ ±${v.std}`:""}`);
+      if(v.std!=null)whisker(s,cx,y(v.mean+v.std),y(Math.max(0,v.mean-v.std)),5);
+      T(s,cx,y(v.mean+(v.std||0))-6,"vlab",fmt(v.mean,ch));});
+    T(s,gc,H-M.b+20,"xlab"+(g.partial?" part":""),g.label);});
+  host.appendChild(s);
+}
+function line(host,ch){
+  const all=ch.series.flatMap(se=>se.points);const{ym,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const n=ch.xlabels.length,step=PW/(n-1||1),x=i=>M.l+step*i;
+  ch.series.forEach(se=>{const c=col(se.color);
+    let dpath=se.points.map((p,i)=>(i?"L":"M")+x(i)+" "+y(p)).join(" ");
+    A(s,"path",{d:dpath,fill:"none",style:`stroke:${c}`,"stroke-width":2.2,"stroke-linejoin":"round","stroke-linecap":"round"});
+    se.points.forEach((p,i)=>{const m=A(s,"circle",{cx:x(i),cy:y(p),r:4,class:"mk",style:`fill:${c}`});hov(m,`<b>${ch.xlabels[i]}</b> · ${se.name}: ${fmt(p,ch)}`);});});
+  ch.xlabels.forEach((l,i)=>T(s,x(i),H-M.b+20,"xlab",l));
+  host.appendChild(s);
+}
+function heat(host,ch){
+  const tb=el("table"),th=el("thead"),tr=el("tr");tr.appendChild(el("th","metric","Métrica"));
+  ch.cols.forEach(c=>{const e=el("th",null,c);tr.appendChild(e);});th.appendChild(tr);tb.appendChild(th);
+  const bd=el("tbody");
+  ch.rows.forEach(r=>{const t=el("tr");const m=el("td","metric",r.label);t.appendChild(m);
+    r.values.forEach(v=>{const b=ch.buckets.find(bk=>bk.lt==null||v<bk.lt)||ch.buckets[ch.buckets.length-1];
+      const td=el("td",null,`<span class="chip cv-${b.cls}">${fmt(v,ch)}</span>`);t.appendChild(td);});
+    bd.appendChild(t);});
+  tb.appendChild(bd);host.appendChild(tb);
+}
+
+function build(){
+  const app=document.getElementById("app");
+  if(SPEC.eyebrow)app.appendChild(el("p","eyebrow",SPEC.eyebrow));
+  app.appendChild(el("h1",null,SPEC.title));
+  if(SPEC.subtitle)app.appendChild(el("p","sub",SPEC.subtitle));
+  if(SPEC.source)app.appendChild(el("p","sub src",SPEC.source));
+  if(SPEC.tiles?.length){const g=el("div","tiles");SPEC.tiles.forEach(t=>{
+    const d=el("div","tile");d.innerHTML=`<div class="lab"><span class="dot" style="background:${col(t.color)}"></span>${t.label}</div><div class="val"${t.value&&/vol|instáv|crít/i.test(t.value)?' style="color:var(--v)"':''}>${t.value}</div>${t.note?`<div class="note">${t.note}</div>`:""}`;g.appendChild(d);});app.appendChild(g);}
+  SPEC.sections.forEach(sec=>{const s=el("section");s.appendChild(el("h2",null,sec.title));if(sec.sub)s.appendChild(el("p","h2sub",sec.sub));
+    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
+    else{const ch=sec.chart;
+      if(ch.type==="grouped"||(ch.type==="line"&&ch.series.length>1)){const lg=el("div","legend");ch.series.forEach(se=>lg.innerHTML+=`<span><span class="dot" style="background:${col(se.color)}"></span>${se.name}</span>`);if(ch.type==="grouped"&&ch.groups.some(g=>g.values.some(v=>v.std!=null)))lg.innerHTML+='<span style="color:var(--faint)">haste = ±1 desvio</span>';s.appendChild(lg);}
+      const card=el("div","card");s.appendChild(card);
+      ({bars,grouped,line,heat}[ch.type]||(()=>{}))(card,ch);}
+    app.appendChild(s);});
+  if(SPEC.footer)app.appendChild(el("p","foot",SPEC.footer));
+}
+build();
+</script>

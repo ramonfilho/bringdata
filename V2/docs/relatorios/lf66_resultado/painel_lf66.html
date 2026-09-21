@@ -1,0 +1,274 @@
+<!--
+  PAINEL-DADOS: template declarativo reutilizável.
+  Para um painel novo: NÃO reescreva o runtime. Só edite o objeto SPEC lá embaixo
+  e publique este arquivo com a ferramenta Artifact.
+
+  SPEC = {
+    eyebrow, title, subtitle(html), source,
+    tiles: [{color, label, value, note}],
+    sections: [
+      { title, sub, chart: {                       // gráfico de barras (1 série)
+          type:'bars', unit:'%'|'R$'|'', dec, color:'accent'|'c1'|'#hex',
+          data:[{label, mean, std?, partial?}] } },
+      { title, sub, chart: {                        // barras agrupadas (N séries)
+          type:'grouped', unit, dec,
+          series:[{name, color}],                   // 2-3; cores c1/c2/c3
+          groups:[{label, values:[{mean,std?}], partial?}] } },
+      { title, sub, chart: {                        // linha (série temporal / ordinal)
+          type:'line', unit, dec,
+          xlabels:[...], series:[{name, color, points:[num,...]}] } },
+      { title, sub, chart: {                        // tabela-mapa (heatmap por bucket)
+          type:'heat', unit, dec, cols:[...],
+          rows:[{label, values:[num,...]}],
+          buckets:[{lt:8,cls:'s'},{lt:20,cls:'m'},{cls:'v'}] } },  // s=verde m=amarelo v=vermelho
+      { title, sub, html:'<p>...</p>' }             // seção de prosa livre
+    ],
+    footer
+  }
+  Regras: 1 eixo por gráfico; hues categóricas em ordem fixa (c1,c2,c3), nunca cicladas;
+  legenda quando >=2 séries; hastes = ±1 desvio (passe std) pra mostrar estabilidade;
+  cores já validadas (CVD) em light e dark. Para 4+ séries, rode o validador do /dataviz.
+-->
+<style>
+  :root{
+    --surface:#fcfcfb; --surface-2:#f4f4f1; --border:#e5e4df;
+    --ink:#1b2128; --muted:#5c6672; --faint:#8a929c; --grid:#e8e7e2;
+    --accent:#6d54d9; --c1:#2f6df0; --c2:#e08a1e; --c3:#0f9d8f;
+    --s:#2f9e6a; --m:#c8871b; --v:#d64545;
+    --s-bg:#e5f3ec; --m-bg:#f7edda; --v-bg:#f7e2e2;
+    --shadow:0 1px 2px rgba(20,25,32,.05),0 4px 16px rgba(20,25,32,.04);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#16181c; --surface-2:#1f2228; --border:#2c3037;
+    --ink:#e9ebee; --muted:#9aa3ad; --faint:#6b7480; --grid:#282c33;
+    --accent:#8a78ea; --c1:#5b8dff; --c2:#c67d1c; --c3:#1f9c8b;
+    --s:#3fb37f; --m:#d99a35; --v:#e56a6a;
+    --s-bg:#16302440; --m-bg:#33280f60; --v-bg:#3a1e1e60;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }}
+  :root[data-theme="light"]{--surface:#fcfcfb;--surface-2:#f4f4f1;--border:#e5e4df;--ink:#1b2128;--muted:#5c6672;--faint:#8a929c;--grid:#e8e7e2;--accent:#6d54d9;--c1:#2f6df0;--c2:#e08a1e;--c3:#0f9d8f;--s:#2f9e6a;--m:#c8871b;--v:#d64545;--s-bg:#e5f3ec;--m-bg:#f7edda;--v-bg:#f7e2e2;}
+  :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  /* Largura pela MAIOR TABELA (24/08/2026, 3ª e definitiva): a coluna da página
+     tem a largura natural do conteúdo mais largo (fit-content) e é centrada como
+     bloco. Assim a tabela larga sai INTEIRA no print quando a tela dá espaço, e o
+     resto do conteúdo acompanha a mesma coluna (nada cola na esquerda). Em tela
+     estreita, max-width:100% devolve o scroll horizontal só dentro da tabela. */
+  .wrap{width:fit-content;min-width:min(100%,760px);max-width:100%;margin:0 auto;padding:40px 24px 64px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
+  h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
+  .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
+  .sub b{color:var(--ink);font-weight:620}
+  .src{margin-top:6px;font-size:13px;color:var(--faint)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px;max-width:980px}
+  .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+  .tile .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .tile .val{font-size:26px;font-weight:730;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .tile .note{font-size:12.5px;color:var(--faint);margin-top:5px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  section{margin-top:40px}
+  h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px}
+  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto;max-width:936px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  svg{display:block;width:100%;height:auto;min-width:520px}
+  .grid-l{stroke:var(--grid);stroke-width:1}
+  .axis-t{fill:var(--faint);font-size:11px;font-family:var(--mono)}
+  .xlab{fill:var(--muted);font-size:12.5px;font-weight:600;font-family:var(--sans)}
+  .xlab.part{fill:var(--faint)}
+  .vlab{fill:var(--ink);font-size:11.5px;font-weight:640;font-family:var(--mono)}
+  .whisk{stroke:var(--ink);stroke-width:1.6;opacity:.5}
+  .bar{cursor:pointer} .bar.part{opacity:.42}
+  .mk{stroke:var(--surface);stroke-width:2}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  th,td{padding:9px 10px;text-align:center;font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--border)}
+  td.metric{text-align:left;color:var(--ink);font-weight:600;white-space:nowrap}
+  tbody tr+tr td{border-top:1px solid var(--border)}
+  .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
+  .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
+  /* SEM trava de largura no texto (pedido do Ramon, 31/08): a prosa acompanha
+     a coluna da página, que cresce com a maior tabela. O cap de 74ch anterior
+     deixava o texto espremido à esquerda em janela larga. */
+  .prose{color:var(--muted);font-size:14.5px}
+  .prose b{color:var(--ink)} .prose li{margin:9px 0}
+  .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
+  .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+  #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;background:var(--ink);color:var(--surface);font-size:12px;font-family:var(--mono);padding:7px 10px;border-radius:8px;box-shadow:var(--shadow);white-space:nowrap;transform:translate(-50%,-115%)}
+
+/* ==== tabelas do relatorio executivo (recuperado do painel DEV21, 24/08/2026) ==== */
+/* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
+   A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
+.tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
+/* width:max-content é o que faz o fit-content do .wrap FUNCIONAR: largura em % é
+   indeterminada no cálculo intrínseco, então com width:100% a página nunca crescia
+   até a tabela (causa-raiz dos 2 consertos anteriores falharem). min-width:100%
+   mantém a tabela preenchendo quando outra tabela maior alargou a coluna. */
+.tb{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+.tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
+  font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
+.tb th:first-child,.tb td:first-child{text-align:left}
+.tb td{padding:7px 9px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
+.tb tr.ag td{font-weight:700;background:rgba(128,128,128,.07)}
+.tb td.pos{color:#1a7f52;font-weight:650} .tb td.neg{color:#b1442f;font-weight:650}
+.tb td.pos b,.tb td.neg b,.tb td.pos i,.tb td.neg i{color:inherit}
+@media (prefers-color-scheme:dark){.tb td.pos{color:#5cc192}.tb td.neg{color:#e08a7a}}
+h4.bl{margin:20px 0 4px;font-size:14px;font-weight:700;letter-spacing:.01em}
+h4.bl span{font-weight:400;font-size:12px;color:var(--muted,#777);margin-left:8px}
+.tb b.ok{color:#1a7f52} .tb .ic{font-size:10.5px;color:var(--muted,#888);white-space:nowrap}
+.tb .ruido{color:var(--muted,#999);font-style:italic;font-size:11.5px}
+.tb th.sp{font-size:9.5px;border-left:1px solid rgba(128,128,128,.28)}
+.tb td.z{color:var(--muted,#bbb);text-align:center}
+@media (prefers-color-scheme:dark){.tb b.ok{color:#5cc192}.tb td.z{color:#555}}
+</style>
+
+<div class="wrap" id="app"></div>
+<div id="tip"></div>
+
+<script>
+/* ==== SPEC: edite só isto para um painel novo (exemplo abaixo = qualidade por LF) ==== */
+const SPEC = {
+ "eyebrow": "DevClub · Lançamento LF66 · captação 25/08 a 31/08 · carrinho 04/09 a 10/09",
+ "title": "Painel do LF66",
+ "subtitle": "O mesmo relatório do DEV21, agora por máquina: um comando gera, o mesmo comando atualiza. Estado: <b>venda aberta</b> · <b>PROVISÓRIO</b>.",
+ "source": "Contrato congelado em 2026-09-04 08:58 · referência 2026-08-31T06:34 · régua 5d158f0a (abr_28) · 100,0% do gasto Meta casado por anúncio",
+ "tiles": [
+  {
+   "color": "c1",
+   "label": "Investimento total",
+   "value": "R$ 64.508",
+   "note": "Meta com imposto (×1,13) + Google."
+  },
+  {
+   "color": "accent",
+   "label": "Cadastros",
+   "value": "7.301",
+   "note": "CPL geral R$ 8,84 por cadastro."
+  },
+  {
+   "color": "c2",
+   "label": "Vendas",
+   "value": "13",
+   "note": "Somatório das campanhas casadas."
+  }
+ ],
+ "sections": [
+  {
+   "title": "1 · Onde o dinheiro foi — por tipo de campanha",
+   "sub": "Tipo = o MODELO que escolhe o público da campanha (identidade estável, mesmo com os nomes novos da equipe de tráfego).",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Tipo de campanha</th><th>Camp.</th><th>Gasto</th><th>Cadastros</th><th>CPL</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody><tr class=''><td><b>Challenger (jul_24)</b></td><td>4</td><td>R$ 33.163,01</td><td>2.791</td><td>R$ 11,88</td><td>6</td><td>0,21%</td><td>R$ 7.373,00</td><td>0,22</td><td class='neg'>R$ -25.790,01</td></tr><tr class=''><td><b>Lead Padrão (Meta)</b></td><td>9</td><td>R$ 17.166,18</td><td>2.965</td><td>R$ 5,79</td><td>0</td><td>0,00%</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -17.166,18</td></tr><tr class=''><td><b>Google Ads</b></td><td>1</td><td>R$ 9.813,58</td><td>1.079</td><td>R$ 9,10</td><td>3</td><td>0,28%</td><td>R$ 4.147,40</td><td>0,42</td><td class='neg'>R$ -5.666,18</td></tr><tr class=''><td><b>Champion (abr_28)</b></td><td>1</td><td>R$ 4.365,65</td><td>280</td><td>R$ 15,59</td><td>1</td><td>0,36%</td><td>R$ 1.997,00</td><td>0,46</td><td class='neg'>R$ -2.368,65</td></tr><tr class=''><td><b>Orgânico/Outro</b></td><td>1</td><td>R$ 0,00</td><td>186</td><td>R$ 0,00</td><td>1</td><td>0,54%</td><td>R$ 1.075,20</td><td>—</td><td>—</td></tr><tr class=''><td><b>Não está na base</b></td><td>1</td><td>R$ 0,00</td><td>0</td><td>—</td><td>2</td><td>—</td><td>R$ 2.322,20</td><td>—</td><td>—</td></tr><tr class='ag'><td><b>TOTAL</b></td><td>17</td><td>R$ 64.508,43</td><td>7.301</td><td>R$ 8,84</td><td>13</td><td>0,18%</td><td>R$ 16.914,80</td><td>0,26</td><td class='neg'>R$ -47.593,63</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "2 · Lucro do modelo contra o Lead — e a separação por público",
+   "sub": "",
+   "html": "<p class='h2sub' style='margin-top:14px'><b>Lucro: modelo contra Lead padrão</b> — só público frio dos dois lados, porque o quente tem economia própria (regra de 16/08) e inflaria o lado em que caísse:</p><div class='tw'><table class='tb'><thead><tr><th></th><th>Camp.</th><th>Gasto</th><th>Cadastros</th><th>CPL</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th><th>Lucro/cadastro</th></tr></thead><tbody><tr class=''><td><b>Campanhas de MODELO (Champion+Challenger), frio</b></td><td>5</td><td>R$ 37.528,67</td><td>3.071</td><td>R$ 12,22</td><td>7</td><td>0,23%</td><td>R$ 9.370,00</td><td>0,25</td><td class='neg'>R$ -28.158,67</td><td class='neg'>R$ -9,17</td></tr><tr class=''><td><b>Lead Padrão (Meta), frio</b></td><td>9</td><td>R$ 17.166,18</td><td>2.965</td><td>R$ 5,79</td><td>0</td><td>0,00%</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -17.166,18</td><td class='neg'>R$ -5,79</td></tr></tbody></table></div><p class='h2sub' style='margin-top:10px'>Neste lançamento, cada cadastro frio do modelo rendeu <b>R$ -9,17</b> de lucro; o do Lead padrão, <b>R$ -5,79</b>.<p class='h2sub' style='margin-top:6px'>Série dos lançamentos fechados (régua atual): o modelo ganhou em 8 de 10. Incluindo este parcial, 8 de 11.</p><p class='h2sub' style='margin-top:14px'><b>Separação dos modelos na série (LF64+LF65+LF66)</b>, no corte que vai pra Meta: top 30 (notas 8-10) contra o resto, só Meta frio. Lift = quantas vezes o topo converte acima do resto. Um lançamento sozinho tem vendas de menos pra dizer qual modelo separa melhor; somados, os dois separam igual, e é por isso que os dois seguem no ar.</p><div class='tw'><table class='tb'><thead><tr><th>Régua</th><th>Leads c/ nota</th><th>% no topo</th><th>Conv. topo</th><th>Conv. base</th><th>Lift topo/base</th></tr></thead><tbody><tr class=''><td><b>régua abr_28 (Champion)</b></td><td>16.198</td><td>31,2%</td><td>1,03%</td><td>0,43%</td><td>2,39x</td></tr><tr class=''><td><b>régua jul_24 (Challenger)</b></td><td>16.198</td><td>23,8%</td><td>1,19%</td><td>0,44%</td><td>2,73x</td></tr></tbody></table></div><p class='h2sub' style='margin-top:14px'><b>Lucro por decil</b> (só Meta frio). Cada lead custa o CPL da dupla anúncio×campanha que o trouxe; o custo do grupo é a soma desses CPLs. <b>Lucro = faturamento − custo</b>; <b>ROAS = faturamento ÷ custo</b> (abaixo de 1,00 o grupo deu prejuízo). Aqui, top 30 do Champion: R$ 8.498 − R$ 21.106 = R$ -12.608, ROAS 0,40. <b>Top 30</b> = notas 8-10, a faixa que vai pra Meta; <b>Bottom 50</b> = notas 1-5. Uma régua por linha, nunca mista. A série soma os lançamentos com essa medição (nota por modelo só vale de 25/07 em diante); carrinho aberto entra parcial. A última linha vai mais longe: usa a nota que o lead recebeu NA ÉPOCA (a do modelo que o atendeu, a mesma que virou valor enviado pro Meta), então cobre os 11 lançamentos. Ela responde \"o topo dá lucro?\", não \"qual modelo é melhor?\".</p><div class='tw'><table class='tb'><thead><tr><th>Modelo</th><th>Lucro top 30</th><th>ROAS top 30</th><th>Lucro Bottom 50</th><th>ROAS Bottom 50</th></tr></thead><tbody><tr class=''><td><b>Champion (abr_28) · este lançamento</b></td><td class='neg'>R$ -12.608</td><td>0,40</td><td class='neg'>R$ -18.631</td><td>0,10</td></tr><tr class=''><td><b>Challenger (jul_24) · este lançamento</b></td><td class='neg'>R$ -5.470</td><td>0,66</td><td class='neg'>R$ -25.531</td><td>0,08</td></tr><tr class=''><td><b>Champion (abr_28) · série (LF64+LF65+LF66)</b></td><td class='pos'>R$ 56.910</td><td>1,92</td><td class='neg'>R$ -31.514</td><td>0,58</td></tr><tr class=''><td><b>Challenger (jul_24) · série (LF64+LF65+LF66)</b></td><td class='pos'>R$ 57.499</td><td>2,22</td><td class='neg'>R$ -25.580</td><td>0,74</td></tr><tr class=''><td><b>Nota usada na época · série completa (LF56→LF66)</b></td><td class='pos'>R$ 275.712</td><td>2,03</td><td class='neg'>R$ -48.338</td><td>0,77</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "3 · Campanha a campanha (top 15 por gasto)",
+   "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Campanha</th><th>Tipo</th><th>Gasto</th><th>Cadastros</th><th>CPL</th><th>Vendas</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody><tr class=''><td>[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 13.581,80</td><td>1.273</td><td>R$ 10,67</td><td>1</td><td>R$ 1.075,20</td><td>0,08</td><td class='neg'>R$ -12.506,60</td></tr><tr class=''><td>Google Ads (agregado)</td><td>Google Ads</td><td>R$ 9.813,58</td><td>1.079</td><td>R$ 9,10</td><td>3</td><td>R$ 4.147,40</td><td>0,42</td><td class='neg'>R$ -5.666,18</td></tr><tr class=''><td>[26][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 8.484,96</td><td>701</td><td>R$ 12,10</td><td>1</td><td>R$ 1.075,20</td><td>0,13</td><td class='neg'>R$ -7.409,76</td></tr><tr class=''><td>[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 6.777,13</td><td>568</td><td>R$ 11,93</td><td>3</td><td>R$ 3.225,60</td><td>0,48</td><td class='neg'>R$ -3.551,53</td></tr><tr class=''><td>[28][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 5.704,74</td><td>1.001</td><td>R$ 5,70</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -5.704,74</td></tr><tr class=''><td>[13][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Champion (abr_28)</td><td>R$ 4.365,65</td><td>280</td><td>R$ 15,59</td><td>1</td><td>R$ 1.997,00</td><td>0,46</td><td class='neg'>R$ -2.368,65</td></tr><tr class=''><td>[19][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 4.319,13</td><td>249</td><td>R$ 17,35</td><td>1</td><td>R$ 1.997,00</td><td>0,46</td><td class='neg'>R$ -2.322,13</td></tr><tr class=''><td>[25][DEVLF][CAP][LEADS][FRIO][CBO][AUT][09.08]</td><td>Lead Padrão (Meta)</td><td>R$ 1.894,23</td><td>308</td><td>R$ 6,15</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.894,23</td></tr><tr class=''><td>[26][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 1.869,98</td><td>329</td><td>R$ 5,68</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.869,98</td></tr><tr class=''><td>[23][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 1.642,00</td><td>380</td><td>R$ 4,32</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.642,00</td></tr><tr class=''><td>[32][DEVLF][CAP][LEADS][SITE][FRIO][INTERESSES</td><td>Lead Padrão (Meta)</td><td>R$ 1.632,07</td><td>247</td><td>R$ 6,61</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.632,07</td></tr><tr class=''><td>[31][DEVLF][CAP][LEADS][SITE][FRIO][INTERESSES</td><td>Lead Padrão (Meta)</td><td>R$ 1.630,60</td><td>250</td><td>R$ 6,52</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.630,60</td></tr><tr class=''><td>[29][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 1.616,23</td><td>253</td><td>R$ 6,39</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.616,23</td></tr><tr class=''><td>[22][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 1.039,76</td><td>175</td><td>R$ 5,94</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.039,76</td></tr><tr class=''><td>[30][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 136,57</td><td>22</td><td>R$ 6,21</td><td>0</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -136,57</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "4 · Teto de CPL — MEDIDO",
+   "sub": "Unidade = criativo×campanha com ≥R$ 300 de gasto. *Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th></th><th>Unidades</th><th>Gasto</th><th>Leads</th><th>Vendas</th><th>ROAS</th><th>Lucro</th><th>Bateu a meta*</th><th>Lucro > R$ 1.000</th><th>Deu lucro</th></tr></thead><tbody><tr class=''><td><b>Respeitaram o teto</b></td><td>1</td><td>R$ 1.510,74</td><td>246</td><td>0</td><td>0,00</td><td class='neg'>R$ -1.510,74</td><td>0</td><td>0</td><td>0</td></tr><tr class=''><td><b>Estouraram o teto</b></td><td>20</td><td>R$ 52.087,89</td><td>4.712</td><td>6</td><td>0,14</td><td class='neg'>R$ -44.714,89</td><td>1</td><td>1</td><td>1</td></tr></tbody></table></div><p class='h2sub' style='margin-top:14px'>A mesma leitura com meta de ROAS <b>1,5</b> (o teto cresce ×1,33; †bateu a meta = ROAS ≥ 1,5 com a mesma tolerância de 2%):</p><div class='tw'><table class='tb'><thead><tr><th></th><th>Unidades</th><th>Gasto</th><th>Leads</th><th>Vendas</th><th>ROAS</th><th>Lucro</th><th>Bateu a meta†</th><th>Lucro > R$ 1.000</th><th>Deu lucro</th></tr></thead><tbody><tr class=''><td><b>Respeitaram o teto</b></td><td>10</td><td>R$ 23.569,85</td><td>2.389</td><td>3</td><td>0,14</td><td class='neg'>R$ -20.344,25</td><td>1</td><td>1</td><td>1</td></tr><tr class=''><td><b>Estouraram o teto</b></td><td>11</td><td>R$ 30.028,79</td><td>2.569</td><td>3</td><td>0,14</td><td class='neg'>R$ -25.881,39</td><td>0</td><td>0</td><td>0</td></tr></tbody></table></div><p class='h2sub' style='margin-top:10px'>Com a régua mais folgada, <b>10</b> de 21 unidades couberam no teto.</p><p class='h2sub' style='margin-top:14px'><b>O dinheiro que o corte não julgava.</b> Até 01/09 o julgamento exigia 100 leads além dos R$ 300, e isso deixava sem veredito R$ 2.449 (4,5% do gasto Meta) — CPL alto é justamente o que impede de juntar 100 leads, então o pior dinheiro ficava invisível. A régua nova (só gasto ≥ R$ 300, já aplicada no julgamento acima) recupera <b>59%</b> disso: 4 duplas e R$ 1.446, 1 delas estourando o teto 1,5. Fica de fora só a cauda com menos de R$ 300 por dupla (R$ 1.003). O prejuízo real dessas 4 duplas é pequeno: R$ 705 de lucro líquido, com R$ 1.070 de prejuízo nas que não venderam e R$ 1.774 de lucro nas que venderam.</p><p class='h2sub' style='margin-top:10px'><b>Por que dá pra confiar (backtest de 01/09, 10 lançamentos fechados):</b> nessa fatia, o dinheiro que o teto do par marcou FORA rendeu 0,75 por real investido; o que marcou DENTRO rendeu 2,66. Foi essa medição que virou a régua oficial do julgamento acima.</p><p class='h2sub' style='margin-top:10px'><b>O que a régua nova muda na prática:</b> ela não salva um desastre, ela mostra o dinheiro cedo. Aqui, 2,0% de toda a verba Meta (R$ 1.070) saiu em 3 duplas que não fizeram uma venda e não apareciam em tabela nenhuma. E o teto antecipado é sinal, não sentença: das 1 marcadas como estouro, 1 perderam tudo e 0 ainda deram lucro. O número do relatório também ficou honesto: o \"dentro do teto 1,5\" saiu de 43,1% (régua velha, 17 duplas julgadas) para 44,0% (régua nova, 21 duplas), porque parou de deixar o pior dinheiro fora da conta.</p>"
+  },
+  {
+   "title": "5 · Criativo agregado por tipo de campanha",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Tipo</th><th>Gasto</th><th>CPL</th><th>Teto 2x</th><th>Teto 1,5x</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody><tr class=''><td>dev-ad0170-vid-captação-v0-</td><td>Challenger (jul_24)</td><td>R$ 375,97</td><td>R$ 11,06</td><td>R$ 8,86</td><td>R$ 11,82</td><td>R$ 2.150,40</td><td>5,72</td><td class='pos'>R$ 1.774,43</td></tr><tr class=''><td>dev-ad0138-vid-captação-v0-podcast</td><td>Champion (abr_28)</td><td>R$ 306,87</td><td>R$ 12,27</td><td>R$ 9,36</td><td>R$ 12,48</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -306,87</td></tr><tr class=''><td>dev-ad0154-vid-captação-v0-sem luz</td><td>Lead Padrão (Meta)</td><td>R$ 353,62</td><td>R$ 7,69</td><td>R$ 3,28</td><td>R$ 4,38</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -353,62</td></tr><tr class=''><td>dev-ad0154-vid-captação-v0-sem luz</td><td>Challenger (jul_24)</td><td>R$ 549,90</td><td>R$ 12,79</td><td>R$ 8,97</td><td>R$ 11,96</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -549,90</td></tr><tr class=''><td>dev-ad01--vid-captação-saiu-na-band on</td><td>Challenger (jul_24)</td><td>R$ 1.064,37</td><td>R$ 6,87</td><td>R$ 5,51</td><td>R$ 7,35</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.064,37</td></tr><tr class=''><td>dev-ad01--vid-captação-saiu-na-band on</td><td>Lead Padrão (Meta)</td><td>R$ 1.640,79</td><td>R$ 4,32</td><td>R$ 3,18</td><td>R$ 4,24</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.640,79</td></tr><tr class=''><td>dev-ad0156 - vid - captação</td><td>Challenger (jul_24)</td><td>R$ 1.814,66</td><td>R$ 10,49</td><td>R$ 8,34</td><td>R$ 11,12</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -1.814,66</td></tr><tr class=''><td>[advtg_aberto]dev-ad0505-vid-captação-</td><td>Lead Padrão (Meta)</td><td>R$ 2.104,93</td><td>R$ 5,33</td><td>R$ 2,27</td><td>R$ 3,02</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -2.104,93</td></tr><tr class=''><td>dev-ad0424-vid-captação-casa de rodolf</td><td>Lead Padrão (Meta)</td><td>R$ 2.228,87</td><td>R$ 5,91</td><td>R$ 2,45</td><td>R$ 3,27</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -2.228,87</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>Champion (abr_28)</td><td>R$ 3.809,77</td><td>R$ 15,61</td><td>R$ 8,96</td><td>R$ 11,94</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -3.809,77</td></tr><tr class=''><td>[advtg_aberto]dev-0002-v1_lfp</td><td>Lead Padrão (Meta)</td><td>R$ 4.203,14</td><td>R$ 6,07</td><td>R$ 4,30</td><td>R$ 5,74</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -4.203,14</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>Lead Padrão (Meta)</td><td>R$ 6.129,19</td><td>R$ 5,96</td><td>R$ 5,56</td><td>R$ 7,41</td><td>R$ 0,00</td><td>0,00</td><td class='neg'>R$ -6.129,19</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>Challenger (jul_24)</td><td>R$ 29.263,99</td><td>R$ 12,31</td><td>R$ 8,61</td><td>R$ 11,48</td><td>R$ 5.222,60</td><td>0,18</td><td class='neg'>R$ -24.041,39</td></tr></tbody></table></div><p class='h2sub' style='margin-top:10px'>Os tetos acima são o agregado do criativo no tipo (média ponderada pelos leads das campanhas em que ele rodou). Se precisarem da quebra por campanha — quanto cada campanha contribuiu para esse número, útil quando há configurações de campanha diferentes — é só pedir: a base já existe.</p>"
+  },
+  {
+   "title": "6 · Comparação com os lançamentos anteriores",
+   "html": "<p class='h2sub'><b>No que já fecha na captação:</b> 44,0% do gasto julgável ficou dentro do teto 1,5 neste lançamento, contra 44,3% no LF65 e 49,1% na média dos 5 melhores ROAS da série (LF62, LF56, LF61, LF57, LF60). CPL por cadastro: 8,84 contra 8,93 e 6,96 nos 5 melhores.</p><p class='h2sub' style='margin-top:14px'><b>O que mudou neste lançamento:</b> as duas alavancas que abrem ou fecham a folga do teto: quanta verba concentrou no criativo certo, e a qualidade do público comprado (% de leads nota 9-10, pesado por leads). <b>Folga = teto 1,5 médio − CPL</b>, sempre no teto do PAR anúncio×campanha: quantos reais por cadastro ainda cabem antes de o lançamento passar do teto. Duas colunas na transição: a régua nova (julga toda dupla com R$ 300 de gasto) e a antiga (exigia também 100 leads). A antiga sai depois do LF67.</p><div class='tw'><table class='tb'><thead><tr><th></th><th>% verba no criativo nº 1</th><th>% top 3 criativos</th><th>% leads D9-D10</th><th>CPL</th><th>Teto 1,5 médio</th><th>Folga · régua R$ 300</th><th>Folga · régua 100 leads</th></tr></thead><tbody><tr><td><b>LF66 (este)</b></td><td>71,8% (dev-ad0160 - vid - cap)</td><td>84,5%</td><td>22,5%</td><td>8,84</td><td>8,70</td><td class='neg'>-0,14</td><td class='neg'>-0,17</td></tr><tr><td><b>LF65 (anterior)</b></td><td>39,6% (dev-ad0160 - vid - cap)</td><td>70,2%</td><td>23,2%</td><td>8,93</td><td>8,66</td><td class='neg'>-0,28</td><td class='neg'>-0,19</td></tr><tr><td><b>Média LF56→LF63 (sem o DEV21)</b></td><td>53,0%</td><td>84,0%</td><td>23,1%</td><td>7,15</td><td>6,87</td><td class='neg'>-0,29</td><td class='neg'>-0,31</td></tr><tr><td><b>Top 3 ROAS (LF62, LF56, LF61)</b></td><td>52,0%</td><td>79,8%</td><td>23,6%</td><td>6,46</td><td>7,18</td><td class='pos'>0,72</td><td class='pos'>0,56</td></tr></tbody></table></div><p class='h2sub' style='margin-top:14px'><b>O que dá pra afirmar hoje: LF66 contra LF65</b><br><br>1- Não é lead mais caro nem de pior qualidade: CPL 8,84 contra 8,93 (-1,1%), qualidade do público -0,7pp de nota 9-10, e 44,0% do gasto dentro do teto 1,5 contra 44,3%.<br><br>2- A verba no criativo nº 1 subiu (+32,2pp): foi 71,8% no LF66 contra 39,6% no LF65; nos 3 maiores criativos, 84,5% contra 70,2% (+14,2pp). E volume maior: 7.301 cadastros (10%) com 8% de verba.<br><br>3- A conversão do lançamento está pior: o faturamento BRUTO de gateway (régua de produto; por isso maior que o atribuído do painel) no dia da abertura está 81% pior (LF66 R$ 27.839, 0,43 por real gasto) contra (LF65 R$ 136.291, 2,29 por real gasto). Obs: o dia ainda aberto pode fechar parte disso.<br><br>Das variáveis que a gente mede, a única que mudou pra pior e pode explicar essa queda é a verba menos concentrada no criativo campeão (+32,2pp). Lead mais caro e público pior estão descartados no item 1.<br><br>O que passar disso NÃO tem explicação nas variáveis que medimos hoje (página, oferta, momento do público).</p><p class='h2sub' style='margin-top:14px'><b>Época do mês, só a conclusão.</b> 1- Base: os 8 fechados, sem o DEV21 (quente, fora da régua). No máximo 2 lançamentos por semana do mês; amostra de cara ou coroa. 2- O que aparece: a 2ª semana tem a pior média de ROAS (0,80: LF58 (1,23) e LF63 (0,38)); a 1ª tem a melhor (2,52: LF57 (1,68) e LF62 (3,35)). 3- Veredito: sugestivo, não conclusivo: uns 5/10 de confiança; só fecha com mais lançamentos. 4- Este LF começou na 4ª semana, que não é a ruim: época não explica o resultado dele.</p>"
+  }
+ ],
+ "footer": "Gerado do contrato.json por render_painel_lancamento.py · 2026-09-04 08:58 · traço (—) = ainda não medido"
+};
+
+/* ==== runtime (não precisa mexer) — versão CORRIGIDA 24/08/2026: eixo aceita
+   mínimo negativo (y0 + linha do zero), fmtAx com R$ e separador pt-BR, barra
+   negativa desenha a partir do zero com rótulo por baixo, e seção aceita
+   gráfico E prosa juntos (recuperada do painel do DEV21) ==== */
+const SVGNS="http://www.w3.org/2000/svg";
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const col=c=>!c?"var(--c1)":(c[0]==="#"?c:`var(--${c})`);
+const svg=(w,h)=>{const s=document.createElementNS(SVGNS,"svg");s.setAttribute("viewBox",`0 0 ${w} ${h}`);s.setAttribute("role","img");return s;};
+const A=(p,t,at)=>{const e=document.createElementNS(SVGNS,t);for(const k in at)e.setAttribute(k,at[k]);p.appendChild(e);return e;};
+const T=(p,x,y,cls,s,anc="middle")=>{const t=A(p,"text",{x,y,class:cls,"text-anchor":anc});t.textContent=s;return t;};
+const tip=document.getElementById("tip");
+const hov=(e,html)=>{e.addEventListener("mousemove",ev=>{tip.innerHTML=html;tip.style.opacity=1;tip.style.left=ev.clientX+"px";tip.style.top=ev.clientY+"px";});e.addEventListener("mouseleave",()=>tip.style.opacity=0);};
+const fmt=(v,ch)=>{const d=ch.dec??(ch.unit==="%"?1:0);return (ch.unit==="R$"?"R$":"")+(+v).toFixed(d)+(ch.unit==="%"?"%":"");};
+const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$ ":"")+(Math.abs(v)>=1000?v.toLocaleString("pt-BR"):v);
+function scale(maxv,minv){let hi=maxv>0?maxv*1.14:0,lo=(minv==null||minv>=0)?0:minv*1.14;const span=(hi-lo)||1;const mag=Math.pow(10,Math.floor(Math.log10(span/5)));const st=[1,2,2.5,5,10].map(m=>m*mag).find(s=>span/s<=6)||10*mag;hi=Math.ceil(hi/st)*st;lo=Math.floor(lo/st)*st;const t=[];for(let v=lo;v<=hi+1e-6;v+=st)t.push(+v.toFixed(6));return{ym:hi,y0:lo,t};}
+const W=760,H=360,M={t:26,r:14,b:42,l:46},PW=W-M.l-M.r,PH=H-M.t-M.b;
+function axis(s,ym,ticks,ch,y0){y0=y0||0;const y=v=>M.t+PH*(1-(v-y0)/((ym-y0)||1));ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
+function whisker(s,cx,yt,yb,cap){A(s,"line",{x1:cx,x2:cx,y1:yt,y2:yb,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yt,y2:yt,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yb,y2:yb,class:"whisk"});}
+
+function bars(host,ch){
+  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const mn=Math.min(0,...ch.data.map(d=>d.mean-(d.std||0)));const{ym,y0,t}=scale(mx,mn);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);const yz=y(0);if(y0<0)A(s,"line",{x1:M.l,x2:W-M.r,y1:yz,y2:yz,class:"grid-l",style:"stroke:var(--muted);opacity:.5"});
+  const slot=PW/ch.data.length,bw=Math.min(46,slot*0.5);
+  ch.data.forEach((d,i)=>{const cx=M.l+slot*(i+.5);
+    const r=A(s,"rect",{x:cx-bw/2,y:Math.min(y(d.mean),yz),width:bw,height:Math.max(1,Math.abs(y(d.mean)-yz)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
+    hov(r,`<b>${d.label}</b> · ${fmt(d.mean,ch)}${d.std!=null?` · σ ±${d.std}`:""}`);
+    if(d.std!=null)whisker(s,cx,y(d.mean+d.std),y(Math.max(0,d.mean-d.std)),6);
+    T(s,cx,d.mean>=0?y(d.mean+(d.std||0))-7:y(d.mean)+15,"vlab",fmt(d.mean,ch));
+    T(s,cx,H-M.b+20,"xlab"+(d.partial?" part":""),d.label);});
+  host.appendChild(s);
+}
+function grouped(host,ch){
+  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,y0,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
+  const n=ch.series.length,slot=PW/ch.groups.length,bw=Math.min(24,slot*0.7/n),gap=3,span=n*bw+(n-1)*gap;
+  ch.groups.forEach((g,i)=>{const gc=M.l+slot*(i+.5);
+    g.values.forEach((v,j)=>{const cx=gc-span/2+bw/2+j*(bw+gap);
+      const r=A(s,"rect",{x:cx-bw/2,y:y(v.mean),width:bw,height:Math.max(0,M.t+PH-y(v.mean)),rx:4,class:"bar"+(g.partial?" part":""),style:`fill:${col(ch.series[j].color)}`});
+      hov(r,`<b>${g.label}</b> · ${ch.series[j].name} ${fmt(v.mean,ch)}${v.std!=null?` · σ ±${v.std}`:""}`);
+      if(v.std!=null)whisker(s,cx,y(v.mean+v.std),y(Math.max(0,v.mean-v.std)),5);
+      T(s,cx,y(v.mean+(v.std||0))-6,"vlab",fmt(v.mean,ch));});
+    T(s,gc,H-M.b+20,"xlab"+(g.partial?" part":""),g.label);});
+  host.appendChild(s);
+}
+function line(host,ch){
+  const all=ch.series.flatMap(se=>se.points);const{ym,y0,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
+  const n=ch.xlabels.length,step=PW/(n-1||1),x=i=>M.l+step*i;
+  ch.series.forEach(se=>{const c=col(se.color);
+    let dpath=se.points.map((p,i)=>(i?"L":"M")+x(i)+" "+y(p)).join(" ");
+    A(s,"path",{d:dpath,fill:"none",style:`stroke:${c}`,"stroke-width":2.2,"stroke-linejoin":"round","stroke-linecap":"round"});
+    se.points.forEach((p,i)=>{const m=A(s,"circle",{cx:x(i),cy:y(p),r:4,class:"mk",style:`fill:${c}`});hov(m,`<b>${ch.xlabels[i]}</b> · ${se.name}: ${fmt(p,ch)}`);});});
+  ch.xlabels.forEach((l,i)=>T(s,x(i),H-M.b+20,"xlab",l));
+  host.appendChild(s);
+}
+function heat(host,ch){
+  const tb=el("table"),th=el("thead"),tr=el("tr");tr.appendChild(el("th","metric","Métrica"));
+  ch.cols.forEach(c=>{const e=el("th",null,c);tr.appendChild(e);});th.appendChild(tr);tb.appendChild(th);
+  const bd=el("tbody");
+  ch.rows.forEach(r=>{const t=el("tr");const m=el("td","metric",r.label);t.appendChild(m);
+    r.values.forEach(v=>{const b=ch.buckets.find(bk=>bk.lt==null||v<bk.lt)||ch.buckets[ch.buckets.length-1];
+      const td=el("td",null,`<span class="chip cv-${b.cls}">${fmt(v,ch)}</span>`);t.appendChild(td);});
+    bd.appendChild(t);});
+  tb.appendChild(bd);host.appendChild(tb);
+}
+
+function build(){
+  const app=document.getElementById("app");
+  if(SPEC.eyebrow)app.appendChild(el("p","eyebrow",SPEC.eyebrow));
+  app.appendChild(el("h1",null,SPEC.title));
+  if(SPEC.subtitle)app.appendChild(el("p","sub",SPEC.subtitle));
+  if(SPEC.source)app.appendChild(el("p","sub src",SPEC.source));
+  if(SPEC.tiles?.length){const g=el("div","tiles");SPEC.tiles.forEach(t=>{
+    const d=el("div","tile");d.innerHTML=`<div class="lab"><span class="dot" style="background:${col(t.color)}"></span>${t.label}</div><div class="val"${t.value&&/vol|instáv|crít/i.test(t.value)?' style="color:var(--v)"':''}>${t.value}</div>${t.note?`<div class="note">${t.note}</div>`:""}`;g.appendChild(d);});app.appendChild(g);}
+  SPEC.sections.forEach(sec=>{const s=el("section");s.appendChild(el("h2",null,sec.title));if(sec.sub)s.appendChild(el("p","h2sub",sec.sub));
+    const ch=sec.chart;
+    if(ch){
+      if(ch.type==="grouped"||(ch.type==="line"&&ch.series.length>1)){const lg=el("div","legend");ch.series.forEach(se=>lg.innerHTML+=`<span><span class="dot" style="background:${col(se.color)}"></span>${se.name}</span>`);if(ch.type==="grouped"&&ch.groups.some(g=>g.values.some(v=>v.std!=null)))lg.innerHTML+='<span style="color:var(--faint)">haste = ±1 desvio</span>';s.appendChild(lg);}
+      const card=el("div","card");s.appendChild(card);
+      ({bars,grouped,line,heat}[ch.type]||(()=>{}))(card,ch);}
+    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
+    app.appendChild(s);});
+  if(SPEC.footer)app.appendChild(el("p","foot",SPEC.footer));
+}
+build();
+</script>
