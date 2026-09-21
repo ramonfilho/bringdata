@@ -26,7 +26,7 @@ requests==2.34.2
 # Database
 psycopg2-binary==2.9.13
 pg8000==1.31.5
-sqlalchemy==2.0.53
+sqlalchemy==2.0.54
 
 # Meta Conversions API
 facebook-business==19.0.3
@@ -44,7 +44,7 @@ gspread==6.2.1
 google-ads==32.0.0
 
 # BigQuery
-google-cloud-bigquery==3.45.1
+google-cloud-bigquery==3.45.2
 
 # Cloud Storage (para upload de relatórios de validação)
 google-cloud-storage==2.19.0
