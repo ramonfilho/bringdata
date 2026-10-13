@@ -1,6 +1,6 @@
 # Web Framework
-fastapi==0.141.1
-uvicorn[standard]==0.53.0
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 
 # Data Processing
@@ -13,29 +13,29 @@ scikit-learn==1.6.1
 joblib==1.6.0
 
 # Validation
-pydantic==2.13.5
+pydantic==2.14.0
 
 # Server
 gunicorn==22.0.0
 
 # Additional dependencies for production
-python-dotenv==1.2.3
+python-dotenv==1.2.4
 httpx==0.28.1
 requests==2.34.2
 
 # Database
 psycopg2-binary==2.9.13
 pg8000==1.31.5
-sqlalchemy==2.0.53
+sqlalchemy==2.1.4
 
 # Meta Conversions API
 facebook-business==19.0.3
 
 # Google Sheets API
-google-auth==2.58.0
-google-auth-oauthlib==1.4.1
-google-auth-httplib2==0.4.2
-google-api-python-client==2.200.0
+google-auth==2.61.0
+google-auth-oauthlib==1.5.0
+google-auth-httplib2==0.4.4
+google-api-python-client==2.201.0
 gspread==6.2.1
 
 # Google Ads API — LEITURA (funil Google no digest). Sem isto a imagem não tem
@@ -44,7 +44,7 @@ gspread==6.2.1
 google-ads==32.0.0
 
 # BigQuery
-google-cloud-bigquery==3.45.1
+google-cloud-bigquery==3.46.1
 
 # Cloud Storage (para upload de relatórios de validação)
 google-cloud-storage==2.19.0
