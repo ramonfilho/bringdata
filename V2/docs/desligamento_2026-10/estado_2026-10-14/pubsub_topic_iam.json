@@ -1,0 +1,12 @@
+{
+  "bindings": [
+    {
+      "members": [
+        "serviceAccount:lead-capture-publisher@smart-ads-451319.iam.gserviceaccount.com"
+      ],
+      "role": "roles/pubsub.publisher"
+    }
+  ],
+  "etag": "BwZSMM0n3G4=",
+  "version": 1
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "ackDeadlineSeconds": 600,
+    "deadLetterPolicy": {
+      "deadLetterTopic": "projects/smart-ads-451319/topics/lead-capture-ingest-dlq",
+      "maxDeliveryAttempts": 20
+    },
+    "expirationPolicy": {},
+    "messageRetentionDuration": "2678400s",
+    "name": "projects/smart-ads-451319/subscriptions/lead-capture-ingest-sub",
+    "pushConfig": {},
+    "state": "ACTIVE",
+    "topic": "projects/smart-ads-451319/topics/lead-capture-ingest"
+  }
+]

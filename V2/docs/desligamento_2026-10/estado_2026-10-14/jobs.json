@@ -1,0 +1,2953 @@
+[
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "39993799-3293-49b9-9dec-f6bbc8cdee76"
+   },
+   "creationTimestamp": "2026-08-12T09:00:12.665523Z",
+   "generation": 8,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-13T14:51:57.877386Z"
+   },
+   "name": "captacoes-ingest-railway",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdzaoNFB8",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/captacoes-ingest-railway",
+   "uid": "5e977e05-3ec9-4d55-9ea4-5da526aee0fd"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "yat_van_cej"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.ingest_captacoes_railway"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "railway-db-password"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:88a5a5db7fda72faa2fe09ab2a4df0c80789debdfe3b53414bebf823b31d3dae",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "1Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "600"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 9057,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T14:22:40.561135Z",
+    "creationTimestamp": "2026-10-14T14:20:02.735804Z",
+    "name": "captacoes-ingest-railway-zxk94"
+   },
+   "observedGeneration": 8
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "df4c7974-8728-4159-956e-9988bfbd69ae"
+   },
+   "creationTimestamp": "2026-08-06T12:57:39.566659Z",
+   "generation": 9,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-10T16:43:04.754975Z"
+   },
+   "name": "dash-zanelato-refresh",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZYtAxcPMY",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/dash-zanelato-refresh",
+   "uid": "dee48fe6-7ad5-4331-9b82-5a7eae35006c"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "dam_lux_fax"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.provisiona_dash_zanelato",
+          "--refresh"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "DASH_LEAD_ID_SALT",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-lead-id-salt"
+            }
+           }
+          },
+          {
+           "name": "POSTGRES_ADMIN_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "mlflow-db-password"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260810_114202",
+         "resources": {
+          "limits": {
+           "cpu": "1000m",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "3600"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 10,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-08-10T10:56:22.537725Z",
+    "creationTimestamp": "2026-08-10T10:30:17.839754Z",
+    "name": "dash-zanelato-refresh-whs72"
+   },
+   "observedGeneration": 9
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "ba83e789-6461-408d-9bc2-6fd156b179cd"
+   },
+   "creationTimestamp": "2026-08-02T12:17:06.099182Z",
+   "generation": 1,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-02T12:17:06.099182Z"
+   },
+   "name": "deploy-gate-sync-monitoring",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdynL1L3I",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/deploy-gate-sync-monitoring",
+   "uid": "d6fe6133-b952-410a-a12e-d7b4ea30679a"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "lux_hec_vug"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-c",
+          "gcloud storage cp gs://smart-ads-mlflow/deploy-gate/sync_monitoring_cron.sh /tmp/s.sh && bash /tmp/s.sh"
+         ],
+         "command": [
+          "bash"
+         ],
+         "image": "gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
+         "resources": {
+          "limits": {
+           "cpu": "1000m",
+           "memory": "512Mi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 0,
+       "serviceAccountName": "deploy-gate-syncer@smart-ads-451319.iam.gserviceaccount.com",
+       "timeoutSeconds": "300"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 79,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T10:32:18.744645Z",
+    "creationTimestamp": "2026-10-14T10:30:05.472451Z",
+    "name": "deploy-gate-sync-monitoring-9lhn5"
+   },
+   "observedGeneration": 1
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "02481c47-992a-438c-bf5f-1248bc2ce545"
+   },
+   "creationTimestamp": "2026-08-15T19:22:30.487283Z",
+   "generation": 12,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-21T09:13:22.327037Z"
+   },
+   "name": "ingest-ad-insights-daily",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdyiwUnJM",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingest-ad-insights-daily",
+   "uid": "56ed5514-a1a1-425f-9d9b-9dcc06f91ed4"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "cus_zey_wug"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.ingest_ad_insights"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:6606acf34adecb9d993df91e814f17c5404c179deaf60707ce52104da7c6b546",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 63,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T10:12:32.796241Z",
+    "creationTimestamp": "2026-10-14T10:10:02.065505Z",
+    "name": "ingest-ad-insights-daily-kp6kc"
+   },
+   "observedGeneration": 12
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "09e9a082-23e0-457c-8534-57293da60c9f"
+   },
+   "creationTimestamp": "2026-07-20T20:08:50.616357Z",
+   "generation": 4,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-07-21T16:21:02.403042Z"
+   },
+   "name": "ingestion-ad-spend",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdydl4w3Q",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingestion-ad-spend",
+   "uid": "3437f987-1568-4c44-8564-635f2f23e0a2"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "fes_qey_nod"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/validation/etl_ad_spend.py",
+          "--daily",
+          "--platforms",
+          "meta",
+          "google"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:latest",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1200"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 90,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T09:49:37.105612Z",
+    "creationTimestamp": "2026-10-14T09:45:05.554636Z",
+    "name": "ingestion-ad-spend-m9xch"
+   },
+   "observedGeneration": 4
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "d099df7e-2600-4497-be97-fa2c6f0681a0"
+   },
+   "creationTimestamp": "2026-08-02T12:29:23.868030Z",
+   "generation": 3,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-02T17:38:08.240807Z"
+   },
+   "name": "ingestion-cadastros-daily",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdygqPl8w",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingestion-cadastros-daily",
+   "uid": "062df75c-9e16-4e55-b2f0-c22bd7350578"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "saw_ses_voc"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/data/cadastros_ingest.py",
+          "--since",
+          "auto"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_CRON_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_WEBHOOK_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_PUBLIC_URL",
+           "value": "https://smart-ads-api-gazrm25mda-uc.a.run.app"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LAUNCHES_SOURCE",
+           "value": "table"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TMB_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260802_143730",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "900"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 76,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T10:03:17.081833Z",
+    "creationTimestamp": "2026-10-14T10:00:02.844009Z",
+    "name": "ingestion-cadastros-daily-rg5pj"
+   },
+   "observedGeneration": 3
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "36647d4b-01e0-43c9-ad57-65f0076990c8"
+   },
+   "creationTimestamp": "2026-07-24T12:54:24.261034Z",
+   "generation": 1,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-07-24T12:54:24.261034Z"
+   },
+   "name": "ingestion-launch-calendar",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdyMSQhGw",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingestion-launch-calendar",
+   "uid": "c3675db1-f76e-47db-8e78-a5a2dcf9ae1c"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "bag_fuw_woj"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/data/launch_calendar.py",
+          "--sync-to-table"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TMB_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:latest",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "smart-ads-451319@appspot.gserviceaccount.com",
+       "timeoutSeconds": "600"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 83,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T08:32:09.925684Z",
+    "creationTimestamp": "2026-10-14T08:30:03.940996Z",
+    "name": "ingestion-launch-calendar-rsfpl"
+   },
+   "observedGeneration": 1
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "8c7457bc-fc26-4910-9353-0601c2c0802c"
+   },
+   "creationTimestamp": "2026-07-02T17:23:54.907184Z",
+   "generation": 3,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-02T14:27:16.618206Z"
+   },
+   "name": "ingestion-leads-incremental",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdyTP33sA",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingestion-leads-incremental",
+   "uid": "6f7e59e0-b03f-4bab-9b57-35ffa95fd6e4"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "yon_haf_cos"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/data/leads_unify.py",
+          "--incremental"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_CRON_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_WEBHOOK_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTLEADS_PUBLIC_URL",
+           "value": "https://smart-ads-api-gazrm25mda-uc.a.run.app"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LAUNCHES_SOURCE",
+           "value": "table"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TMB_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260802_112642",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 105,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T09:03:20.974687Z",
+    "creationTimestamp": "2026-10-14T09:00:11.877960Z",
+    "name": "ingestion-leads-incremental-jj4wk"
+   },
+   "observedGeneration": 3
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "cd2f7081-feec-434a-9976-f7c9b81e40f7"
+   },
+   "creationTimestamp": "2026-07-02T17:23:32.377953Z",
+   "generation": 3,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-07-30T14:34:12.364445Z"
+   },
+   "name": "ingestion-sales-daily",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdyaAlp4A",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/ingestion-sales-daily",
+   "uid": "301b1b82-8665-4457-a3a8-8cc834293d63"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "kec_lij_nuv"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/validation/etl_sales.py",
+          "--daily"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TMB_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GURU_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "HOTMART_BASIC",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "ASAAS_API_KEY",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "BOLETEX_API_KEY",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260721_170341",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "900"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 108,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T09:33:34.093436Z",
+    "creationTimestamp": "2026-10-14T09:30:03.143368Z",
+    "name": "ingestion-sales-daily-lpz5v"
+   },
+   "observedGeneration": 3
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "9a5888b3-3fe7-4ef3-9983-48f6ba7c6269"
+   },
+   "creationTimestamp": "2026-07-21T16:38:27.772407Z",
+   "generation": 7,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-06T15:11:12.005590Z"
+   },
+   "name": "meta-audiences-daily",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdykj7ySI",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/meta-audiences-daily",
+   "uid": "5d5409f9-80dc-47bd-9404-6549134d833b"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "dat_fic_sun"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/scripts/meta_audiences_sync.py",
+          "--audience",
+          "all",
+          "--execute",
+          "--yes-write-to-client-meta"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "meta-audiences-token"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260806_121043",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 92,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T10:20:39.426550Z",
+    "creationTimestamp": "2026-10-14T10:15:04.227291Z",
+    "name": "meta-audiences-daily-zpwms"
+   },
+   "observedGeneration": 7
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "36eb06da-37dd-4b87-8ac0-6a075b49353d"
+   },
+   "creationTimestamp": "2026-07-02T17:29:24.349053Z",
+   "generation": 10,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-05T12:15:02.901662Z"
+   },
+   "name": "model-performance-report",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdocyZTFg",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/model-performance-report",
+   "uid": "296781d4-2a98-43e6-b3b2-579179af4a65"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "hof_toy_cuq"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "/app/src/validation/model_performance.py",
+          "--lf",
+          "challenger",
+          "--window-days",
+          "14",
+          "--persist",
+          "--slack"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "SLACK_USER_DM",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "SLACK_BOT_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:e2661f5dc924fa42a04ae74d6264c33841cb14cfb41714960ca893ef474850d9",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 0,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "900"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 26,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-12T10:02:43.326436Z",
+    "creationTimestamp": "2026-10-12T10:00:37.331248Z",
+    "name": "model-performance-report-kl2tn"
+   },
+   "observedGeneration": 10
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "6b2c4dcf-60f6-4c8f-9f77-e16859434bec"
+   },
+   "creationTimestamp": "2026-08-15T18:20:06.112625Z",
+   "generation": 1,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-15T18:20:06.112625Z"
+   },
+   "name": "push-scores-ensaio",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZZGgkIq/Y",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/push-scores-ensaio",
+   "uid": "fc338068-b99a-4880-b2c5-872ebbaafc48"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "quv_yut_wib"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.push_scores_zanelato",
+          "--dump-parity"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:07edfe37e92d61542cbac36e77b34bec194a4ff1055fd4c06fce8ad2a7b40718",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 1,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-08-15T18:23:34.247748Z",
+    "creationTimestamp": "2026-08-15T18:20:17.151670Z",
+    "name": "push-scores-ensaio-9bthd"
+   },
+   "observedGeneration": 1
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "7109455b-d856-47a2-947a-bf0fcdd333ef"
+   },
+   "creationTimestamp": "2026-08-12T11:01:27.837642Z",
+   "generation": 22,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-09-01T15:59:38.107434Z"
+   },
+   "name": "push-scores-zanelato",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdzbL+QNA",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/push-scores-zanelato",
+   "uid": "fec23a8e-7b1f-45ba-b62b-445af409b4f7"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "gig_roy_cen"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.push_scores_zanelato"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "META_ACCOUNT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:26acd1075eeb7442f8acb2ed465e95212d5e42f3b8c5769704e98e597e32cdcf",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "2Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 1533,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T14:25:09.049827Z",
+    "creationTimestamp": "2026-10-14T14:22:01.303149Z",
+    "name": "push-scores-zanelato-9gkbm"
+   },
+   "observedGeneration": 22
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "4c75c080-5167-4cd1-8f6f-d83cbc5d1b0c"
+   },
+   "creationTimestamp": "2026-08-03T11:25:43.638936Z",
+   "generation": 11,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-21T09:13:26.498363Z"
+   },
+   "name": "refresh-rolling-reference",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdnt/LUGI",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/refresh-rolling-reference",
+   "uid": "26ad3bff-a98e-4fe7-b990-1517f5184368"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "koh_gow_xeq"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.refresh_rolling_reference"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "ENVIRONMENT",
+           "value": "production"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_CLIENT_SECRET",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GOOGLE_ADS_REFRESH_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "GURU_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "LEDGER_DECIL_READ_SOURCE",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_READ_SOURCE",
+           "value": "cloudsql"
+          },
+          {
+           "name": "LEDGER_TARGET",
+           "value": "cloudsql"
+          },
+          {
+           "name": "META_ACCESS_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "META_DATA_SOURCE",
+           "value": "api"
+          },
+          {
+           "name": "PUBSUB_CAPI_ENABLED",
+           "value": "true"
+          },
+          {
+           "name": "RAILWAY_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_NAME",
+           "value": "railway"
+          },
+          {
+           "name": "RAILWAY_DB_PASSWORD",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "RAILWAY_DB_PORT",
+           "value": "11594"
+          },
+          {
+           "name": "RAILWAY_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "SLACK_VALIDATION_DM_CHANNEL",
+           "value": "D0A9USV3XEX"
+          },
+          {
+           "name": "SLACK_WEBHOOK_URL",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TMB_API_TOKEN",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+           "value": "C09VD6J8A72"
+          },
+          {
+           "name": "VALIDATION_REPORTS_BUCKET",
+           "value": "bring-data-validation-reports"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:6606acf34adecb9d993df91e814f17c5404c179deaf60707ce52104da7c6b546",
+         "resources": {
+          "limits": {
+           "cpu": "2",
+           "memory": "4Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "smart-ads-451319@appspot.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 19,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-12T06:33:20.139505Z",
+    "creationTimestamp": "2026-10-12T06:30:05.942030Z",
+    "name": "refresh-rolling-reference-f9zh2"
+   },
+   "observedGeneration": 11
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "24943b19-b84b-4175-985d-1b724b9503e0"
+   },
+   "creationTimestamp": "2026-09-18T00:09:14.078429Z",
+   "generation": 3,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-09-18T13:24:44.352537Z"
+   },
+   "name": "retreino-mensal",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdH/4qIq4",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/retreino-mensal",
+   "uid": "7d93ddbf-3e7d-4183-bfe7-c6c7a7436dfb"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "woj_woh_tax"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "--leads-source=db",
+          "--sales-source=db",
+          "--no-api-data",
+          "--pos-treino"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "MLFLOW_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "MLFLOW_DB_PORT",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "MLFLOW_DB_USER",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "MLFLOW_DB_NAME",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LAUNCHES_SOURCE",
+           "value": "table"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "SLACK_USER_DM",
+           "value": "U0A9ZB17B2M"
+          },
+          {
+           "name": "GITHUB_REPO",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "MLFLOW_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "mlflow-db-password"
+            }
+           }
+          },
+          {
+           "name": "SLACK_BOT_TOKEN",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "slack-bot-token"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-treino:v20260918_121113",
+         "resources": {
+          "limits": {
+           "cpu": "4",
+           "memory": "8Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 0,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "3600"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 3,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_FAILED",
+    "completionTimestamp": "2026-10-05T23:10:48.887909Z",
+    "creationTimestamp": "2026-10-05T23:05:08.308047Z",
+    "name": "retreino-mensal-tv5k5"
+   },
+   "observedGeneration": 3
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "170e493b-01dc-41db-8ff2-859b589933b3"
+   },
+   "creationTimestamp": "2026-08-10T14:49:30.537309Z",
+   "generation": 16,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-09-17T23:49:25.366217Z"
+   },
+   "name": "zanelato-supabase-auditar",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdueOruQk",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/zanelato-supabase-auditar",
+   "uid": "c33bb2cc-abab-4975-afc2-352f69b8e18d"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "vih_xom_dur"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.push_supabase_zanelato",
+          "--auditar"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "DASH_LEAD_ID_SALT",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-lead-id-salt"
+            }
+           }
+          },
+          {
+           "name": "SLACK_BOT_TOKEN",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "slack-bot-token"
+            }
+           }
+          },
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "SLACK_USER_DM",
+           "value": "D0A9USV3XEX"
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260917_223051",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "1Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 0,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "1800"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 76,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_FAILED",
+    "completionTimestamp": "2026-10-13T14:47:06.615348Z",
+    "creationTimestamp": "2026-10-13T14:45:04.222305Z",
+    "name": "zanelato-supabase-auditar-wwpdf"
+   },
+   "observedGeneration": 16
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "33c0976b-5067-41f8-802f-a739f44ecd7b"
+   },
+   "creationTimestamp": "2026-08-10T14:49:24.700544Z",
+   "generation": 10,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-13T14:52:11.024393Z"
+   },
+   "name": "zanelato-supabase-incremental",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdzbpjgfw",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/zanelato-supabase-incremental",
+   "uid": "fb713c84-6c65-4cc1-b573-19184d8aa148"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "xur_meq_vun"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.push_supabase_zanelato",
+          "--incremental"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "DASH_LEAD_ID_SALT",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-lead-id-salt"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:88a5a5db7fda72faa2fe09ab2a4df0c80789debdfe3b53414bebf823b31d3dae",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "1Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "600"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 9050,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-14T14:27:14.732780Z",
+    "creationTimestamp": "2026-10-14T14:25:02.610048Z",
+    "name": "zanelato-supabase-incremental-672qn"
+   },
+   "observedGeneration": 10
+  }
+ },
+ {
+  "apiVersion": "run.googleapis.com/v1",
+  "kind": "Job",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "571.0.0",
+    "run.googleapis.com/creator": "<dono-do-projeto>",
+    "run.googleapis.com/lastModifier": "<dono-do-projeto>",
+    "run.googleapis.com/operation-id": "10b76f19-138e-4ac6-8eb6-5aab6dae7272"
+   },
+   "creationTimestamp": "2026-08-10T14:49:27.919504Z",
+   "generation": 10,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1",
+    "run.googleapis.com/lastUpdatedTime": "2026-08-13T14:52:15.063104Z"
+   },
+   "name": "zanelato-supabase-podar",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZdua02WG0",
+   "selfLink": "/apis/run.googleapis.com/v1/namespaces/12955519745/jobs/zanelato-supabase-podar",
+   "uid": "dcc67241-cdce-43a3-bf89-76e9182fff91"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "571.0.0",
+      "run.googleapis.com/execution-environment": "gen2"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "yoz_foh_pep"
+     }
+    },
+    "spec": {
+     "taskCount": 1,
+     "template": {
+      "spec": {
+       "containers": [
+        {
+         "args": [
+          "-m",
+          "scripts.push_supabase_zanelato",
+          "--podar"
+         ],
+         "command": [
+          "python"
+         ],
+         "env": [
+          {
+           "name": "LEDGER_DB_HOST",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "LEDGER_DB_PORT",
+           "value": "5432"
+          },
+          {
+           "name": "LEDGER_DB_NAME",
+           "value": "ledger"
+          },
+          {
+           "name": "LEDGER_DB_USER",
+           "value": "ledger_app"
+          },
+          {
+           "name": "TZ",
+           "value": "America/Sao_Paulo"
+          },
+          {
+           "name": "PYTHONUNBUFFERED",
+           "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+          },
+          {
+           "name": "SUPABASE_ZANELATO_URL",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-zanelato-supabase-url"
+            }
+           }
+          },
+          {
+           "name": "LEDGER_DB_PASSWORD",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "ledger-db-password"
+            }
+           }
+          },
+          {
+           "name": "DASH_LEAD_ID_SALT",
+           "valueFrom": {
+            "secretKeyRef": {
+             "key": "latest",
+             "name": "dash-lead-id-salt"
+            }
+           }
+          }
+         ],
+         "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:88a5a5db7fda72faa2fe09ab2a4df0c80789debdfe3b53414bebf823b31d3dae",
+         "resources": {
+          "limits": {
+           "cpu": "1",
+           "memory": "1Gi"
+          }
+         }
+        }
+       ],
+       "maxRetries": 1,
+       "serviceAccountName": "12955519745-compute@developer.gserviceaccount.com",
+       "timeoutSeconds": "900"
+      }
+     }
+    }
+   }
+  },
+  "status": {
+   "conditions": [
+    {
+     "status": "True",
+     "type": "Ready"
+    }
+   ],
+   "executionCount": 63,
+   "latestCreatedExecution": {
+    "completionStatus": "EXECUTION_SUCCEEDED",
+    "completionTimestamp": "2026-10-13T14:31:52.413406Z",
+    "creationTimestamp": "2026-10-13T14:30:16.799098Z",
+    "name": "zanelato-supabase-podar-fvq26"
+   },
+   "observedGeneration": 10
+  }
+ }
+]

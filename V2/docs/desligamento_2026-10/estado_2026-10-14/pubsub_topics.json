@@ -1,0 +1,14 @@
+[
+  {
+    "name": "projects/smart-ads-451319/topics/example-normal-window"
+  },
+  {
+    "name": "projects/smart-ads-451319/topics/normal-window"
+  },
+  {
+    "name": "projects/smart-ads-451319/topics/lead-capture-ingest"
+  },
+  {
+    "name": "projects/smart-ads-451319/topics/lead-capture-ingest-dlq"
+  }
+]

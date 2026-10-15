@@ -1,0 +1,779 @@
+[
+ {
+  "attemptDeadline": "600s",
+  "description": "Daily digest 6h BRT — view FULL para DM Ramon (D0A9USV3XEX)",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app/monitoring/slack-digest?channel_full=D0A9USV3XEX&hours=24"
+  },
+  "lastAttemptTime": "2026-10-14T09:20:02.069209Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/slack-digest-daily-dm",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "20 6 * * *",
+  "scheduleTime": "2026-10-15T09:20:01.877350Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-04T12:37:49.457841Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/monitoring/utm-quality/daily-trafego?min_volume=20&top_n=5"
+  },
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/utm-quality-daily-trafego",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "40 6 * * *",
+  "state": "PAUSED",
+  "status": {
+   "code": -1
+  },
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-18T11:41:55.976123Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Polling Railway PostgreSQL para leads sem score ML (a cada 5 minutos)",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/railway/process-pending"
+  },
+  "lastAttemptTime": "2026-10-14T14:25:03.426914Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/railway-polling",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "*/5 * * * *",
+  "scheduleTime": "2026-10-14T14:30:02.528962Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-07-23T12:07:11.557413Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Semanal: recalcula a referencia rolante (conversao + calibrador + perfil de comprador) em analytics.reference_rolling. Roda antes do digest das 06:00 BRT de segunda.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/refresh-rolling-reference:run"
+  },
+  "lastAttemptTime": "2026-10-12T06:30:05.840238Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/refresh-rolling-reference-weekly",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 6 * * MON",
+  "scheduleTime": "2026-10-19T06:30:03.854028Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-03T11:28:35.664927Z"
+ },
+ {
+  "attemptDeadline": "300s",
+  "description": "Alerta de custo do Cloud Run: DM se o uso bruto de ontem passar do teto (CLOUD_RUN_COST_ALERT_BRL, hoje R$ 10). Tambem avisa se o faturamento nao trouxer linhas do dia.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app/monitoring/cost-alert"
+  },
+  "lastAttemptTime": "2026-10-14T09:25:02.157966Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/cloud-run-cost-alert-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "25 6 * * *",
+  "scheduleTime": "2026-10-15T09:25:01.119649Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-09T18:56:00.488851Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Railway (Client+UTMTracking) -> analytics.captacoes. Roda 5 min ANTES da entrega: se a entrega rodar primeiro, ela manda o estado velho.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/captacoes-ingest-railway:run"
+  },
+  "lastAttemptTime": "2026-10-14T14:20:02.642389Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/captacoes-ingest-railway-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "*/10 * * * *",
+  "scheduleTime": "2026-10-14T14:30:01.666205Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-12T09:45:44.154909Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Ingestão diária: todos os cadastros (Client+leads_capi) → analytics.cadastros",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingestion-cadastros-daily:run"
+  },
+  "lastAttemptTime": "2026-10-14T10:00:02.770670Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingestion-cadastros-daily-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 10 * * *",
+  "scheduleTime": "2026-10-15T10:00:00.935101Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T17:40:26.775912Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Ingestão diária: gasto de anúncio (Meta) por campanha×dia em analytics.ad_spend",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingestion-ad-spend:run"
+  },
+  "lastAttemptTime": "2026-10-14T09:45:05.465571Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingestion-ad-spend-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "45 9 * * *",
+  "scheduleTime": "2026-10-15T09:45:03.784108Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T12:30:28.315432Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingest-ad-insights-daily:run"
+  },
+  "lastAttemptTime": "2026-10-14T10:10:01.970393Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingest-ad-insights-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "10 10 * * *",
+  "scheduleTime": "2026-10-15T10:10:00.176426Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-15T19:22:35.940097Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/dash-zanelato-refresh:run"
+  },
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/dash-zanelato-refresh-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 7 * * *",
+  "state": "PAUSED",
+  "status": {
+   "code": -1
+  },
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-10T16:43:18.320762Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/zanelato-supabase-podar:run"
+  },
+  "lastAttemptTime": "2026-10-13T14:30:16.691853Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/zanelato-supabase-podar-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 11 * * *",
+  "scheduleTime": "2026-10-14T14:30:01.231068Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-12T17:46:26.173590Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Ingestão diária: calendário de LFs (planilha do cliente) → analytics.launch_calendar",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingestion-launch-calendar:run"
+  },
+  "lastAttemptTime": "2026-10-14T08:30:03.861253Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingestion-launch-calendar-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 8 * * *",
+  "scheduleTime": "2026-10-15T08:30:02.854649Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T12:30:04.047868Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app/monitoring/painel-vigia",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app/monitoring/painel-vigia"
+  },
+  "lastAttemptTime": "2026-10-14T13:50:24.198355Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/painel-vigia-hourly",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "50 * * * *",
+  "scheduleTime": "2026-10-14T14:50:04.820152Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-18T17:06:54.750053Z"
+ },
+ {
+  "attemptDeadline": "600s",
+  "description": "Refresh diário do lookup de custo por adset (cpl_adset + ad_to_adset_map). Bloco B/4 do EVENTOS_E_DECIS_PLANO. Reusa container smart-ads-api existente.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/admin/refresh-cpl"
+  },
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/cpl-refresh-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 4 * * *",
+  "state": "PAUSED",
+  "status": {
+   "code": -1
+  },
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-18T11:47:19.413728Z"
+ },
+ {
+  "attemptDeadline": "600s",
+  "description": "Daily digest 6h BRT — view cliente para #team-dados (DevClub)",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app/monitoring/slack-digest?channel_client=%23team-dados&hours=24"
+  },
+  "lastAttemptTime": "2026-10-14T09:00:01.784167Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/slack-digest-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 6 * * *",
+  "scheduleTime": "2026-10-15T09:00:01.587278Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-04T12:37:47.417189Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "deploy-gate-syncer@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/deploy-gate-sync-monitoring:run"
+  },
+  "lastAttemptTime": "2026-10-14T10:30:05.392074Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/deploy-gate-sync-monitoring-daily",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 10 * * *",
+  "scheduleTime": "2026-10-15T10:30:04.694471Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T12:17:10.401423Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Nota por criativo e campanha -> public.scores_inbound. De hora em hora: a nota e por lancamento ACUMULADO, move devagar. Minuto 22 porque a ingestao roda em 0/10/20/30/40/50 e a entrega em 5/15/25/35/45/55 — minuto terminado em 0 ou 5 colidiria.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/push-scores-zanelato:run"
+  },
+  "lastAttemptTime": "2026-10-14T14:22:01.217884Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/push-scores-zanelato-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "22 * * * *",
+  "scheduleTime": "2026-10-14T15:22:00.233913Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-12T11:04:28.109343Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/retreino-mensal:run"
+  },
+  "lastAttemptTime": "2026-10-01T09:00:00.364344Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/retreino-mensal-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 6 1 * *",
+  "scheduleTime": "2026-11-01T09:00:01.434612Z",
+  "state": "ENABLED",
+  "status": {
+   "code": 7
+  },
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-09-18T13:24:49.126419Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/zanelato-supabase-incremental:run"
+  },
+  "lastAttemptTime": "2026-10-14T14:25:02.523330Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/zanelato-supabase-incremental-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "5-59/10 * * * *",
+  "scheduleTime": "2026-10-14T14:35:01.471342Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-12T19:07:32.724368Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Relatorio de criativo (2a vez/dia, 14h BRT) para o grupo de trafego - espelha utm-quality-daily-trafego",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "GET",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/monitoring/utm-quality/daily-trafego?min_volume=20&top_n=5&date=hoje"
+  },
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/utm-quality-daily-trafego-tarde",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 14 * * *",
+  "state": "PAUSED",
+  "status": {
+   "code": -1
+  },
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-18T11:41:57.874703Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Consumer Pub/Sub (lead-capture-ingest-sub) -> CAPI scoreado. Off por PUBSUB_CAPI_ENABLED; quando off retorna no-op. Off-by-default 2026-05-23.",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/pubsub/process-pending"
+  },
+  "lastAttemptTime": "2026-10-14T14:25:02.724344Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/pubsub-process-pending",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "*/5 * * * *",
+  "scheduleTime": "2026-10-14T14:30:01.775966Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-07-23T12:07:15.447283Z"
+ },
+ {
+  "attemptDeadline": "600s",
+  "description": "HotLeads: submete leads recentes sem selo ao batch_enrich da Hotmart",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler",
+    "X-HotLeads-Token": "<redigido>"
+   },
+   "httpMethod": "POST",
+   "oidcToken": {
+    "audience": "https://smart-ads-api-gazrm25mda-uc.a.run.app",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://smart-ads-api-gazrm25mda-uc.a.run.app/hotleads/submit-batch"
+  },
+  "lastAttemptTime": "2026-10-14T14:15:03.649809Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/hotleads-submit",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "*/15 * * * *",
+  "scheduleTime": "2026-10-14T14:30:03.451118Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-05T22:08:42.419856Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Ingestão diária: anexa leads novos do ledger ao train_unified",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingestion-leads-incremental:run"
+  },
+  "lastAttemptTime": "2026-10-14T09:00:11.770999Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingestion-leads-incremental-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 9 * * *",
+  "scheduleTime": "2026-10-15T09:00:03.211664Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T12:30:13.519292Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Relatório semanal de performance de ranqueamento dos modelos (seg 07h BRT)",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/model-performance-report:run"
+  },
+  "lastAttemptTime": "2026-10-12T10:00:37.246301Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/model-performance-weekly",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "0 10 * * MON",
+  "scheduleTime": "2026-10-19T10:00:02.934399Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-07-02T17:32:52.290864Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Diário 07:15 BRT: substitui os 2 públicos da Meta (leads+alunos) por hash",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/meta-audiences-daily:run"
+  },
+  "lastAttemptTime": "2026-10-14T10:15:04.151881Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/meta-audiences-daily-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "15 10 * * *",
+  "scheduleTime": "2026-10-15T10:15:02.133596Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-07-21T17:11:13.047088Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/zanelato-supabase-auditar:run"
+  },
+  "lastAttemptTime": "2026-10-13T14:45:04.111176Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/zanelato-supabase-auditar-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "45 11 * * *",
+  "scheduleTime": "2026-10-14T14:45:02.073203Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "America/Sao_Paulo",
+  "userUpdateTime": "2026-08-12T17:41:01.392812Z"
+ },
+ {
+  "attemptDeadline": "180s",
+  "description": "Ingestão diária: vendas dos 4 gateways API + alerta tmb stale",
+  "httpTarget": {
+   "headers": {
+    "User-Agent": "Google-Cloud-Scheduler"
+   },
+   "httpMethod": "POST",
+   "oauthToken": {
+    "scope": "https://www.googleapis.com/auth/cloud-platform",
+    "serviceAccountEmail": "12955519745-compute@developer.gserviceaccount.com"
+   },
+   "uri": "https://us-central1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/smart-ads-451319/jobs/ingestion-sales-daily:run"
+  },
+  "lastAttemptTime": "2026-10-14T09:30:03.067260Z",
+  "name": "projects/smart-ads-451319/locations/us-central1/jobs/ingestion-sales-daily-cron",
+  "retryConfig": {
+   "maxBackoffDuration": "3600s",
+   "maxDoublings": 5,
+   "maxRetryDuration": "0s",
+   "minBackoffDuration": "5s"
+  },
+  "schedule": "30 9 * * *",
+  "scheduleTime": "2026-10-15T09:30:02.856034Z",
+  "state": "ENABLED",
+  "status": {},
+  "timeZone": "Etc/UTC",
+  "userUpdateTime": "2026-08-02T12:30:19.339477Z"
+ }
+]
