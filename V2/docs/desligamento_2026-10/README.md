@@ -13,8 +13,9 @@ ainda falta fazer e como acordar tudo de novo.
   dado pessoal do cliente dentro do prazo contratual, e manter apenas o que o termo permite:
   modelos treinados e uma base anonimizada (sem nome, e-mail, telefone ou IP: cada pessoa virou
   um código, `pessoa_id`, que não volta a ser e-mail).
-- O projeto GCP fica vivo, dormindo, por uns R$ 3 por mês. Tudo que custa parado foi apagado
-  ou será apagado dentro do prazo. Tudo que é preciso para reativar está guardado (seção 5).
+- Desde 15/10/2026 o projeto GCP está sem conta de faturamento, com custo zero. Sem faturamento, o
+  Google pode apagar o que sobrou nos buckets e no Artifact Registry. Tudo que é preciso para
+  reativar está no Mac, em `~/Desktop/bring_data_arquivo/` (seção 4), e o roteiro está na seção 5.
 - O que nunca volta: o dado pessoal do cliente antigo e as credenciais dele. Reativação é com
   cliente novo, dados novos e segredos novos.
 - Registro de execução, com data e resultado de cada passo: seção 8, no fim.
@@ -88,29 +89,37 @@ Marcação: `[x]` feito, `[ ]` pendente. Data e resultado de cada um na seção 
 - [x] 3.4 Apagar os 14 segredos (nomes e papel na seção 5.3).
 - [x] 3.5 Apagar as imagens que nenhum serviço ou job usa, e os pacotes de teste (`bring-data-api`, `smart-ads-api-final`, `-fix`, `-strict`, `-apiatest`, `smartads`, `smartads-api`, `hotleads-*`).
 - [x] 3.6 Apagar `gs://smart-ads-451319_cloudbuild` e `gs://run-sources-...` (cache de build, recriados pelo deploy).
-- [ ] 3.7 Apagar as cópias locais com dado pessoal no Mac (lista na seção 7). A lista foi apagada em 14/10. Falta confirmar a origem de um CSV de 11/08 em `~/Downloads`.
-- [ ] 3.8 Apagar a pasta compartilhada do Drive com a entrega, depois de o cliente confirmar que baixou.
+- [x] 3.7 Apagar as cópias locais com dado pessoal no Mac (lista na seção 7).
+- [x] 3.8 Apagar a pasta compartilhada do Drive com a entrega, depois do aviso ao cliente.
 - [x] 3.9 Apagar os diretórios de trabalho das sessões do Claude que guardam CSV bruto (`csv_brutos`, `pacote_devclub`).
-- [ ] 3.10 Confirmar que os objetos do cofre temporário foram apagados pela regra de ciclo de vida (ou apagar à mão) e apagar o bucket vazio, antes do prazo contratual. A regra apaga objetos, não o bucket. Conferir com `gcloud storage buckets describe gs://smart-ads-cofre-temporario --format='value(lifecycle_config)'` (em 15/10/2026: `Delete` aos 24 dias, ativa) e `gcloud storage ls gs://smart-ads-cofre-temporario`. Depois, `gcloud storage buckets delete gs://smart-ads-cofre-temporario`.
+- [x] 3.10 Apagar o cofre temporário, objetos e bucket, antes do prazo contratual.
 - [x] 3.11 Achado na execução: um run do MLflow tinha o conjunto de treino logado como artefato (`conjunto_de_treino.parquet`, com e-mail, telefone e nome). Apagado do bucket e da cópia local. Os `model.pkl` ficam.
 
 ### Passo 4: registrar
 
-- [ ] 4.1 E-mail curto ao cliente registrando a data da eliminação.
-- [ ] 4.2 Atualizar a seção 8 deste arquivo e a memória de sessão.
+- [ ] 4.1 E-mail curto ao cliente registrando a eliminação. O rascunho está pronto no Gmail, em resposta à notificação de rescisão.
+- [x] 4.2 Atualizar a seção 8 deste arquivo e a memória de sessão.
 
-## 4. O que fica dormindo
+### Passo 5: zerar o custo
 
-| Recurso | Estado | Custo mensal estimado |
+- [x] 5.1 Copiar para o Mac o que só existia no GCP: histórico do MLflow (dump do banco), estado do Terraform, último gatilho do retreino, `state.json` dos alertas e o custo mensal por serviço.
+- [x] 5.2 Tirar do GitHub a variável `GCP_WORKLOAD_IDENTITY_PROVIDER`. Sem ela o CI não se autentica no GCP e os testes que precisam do artefato do modelo pulam, em vez de falhar.
+- [x] 5.3 Desvincular a conta de faturamento do projeto (`gcloud billing projects unlink smart-ads-451319`).
+
+## 4. O que ficou e onde
+
+| O quê | Onde | Para que serve |
 |---|---|---|
-| Projeto, APIs ativas, IAM, contas de serviço | intactos | R$ 0 |
-| 3 serviços Cloud Run | deployados, ingress `internal`, sem agendador, sem invoker público | R$ 0 |
-| 18 jobs Cloud Run | deployados, sem agendador | R$ 0 |
-| 1 imagem por serviço e por job no `gcr.io` | mantidas | cerca de R$ 2 |
-| `gs://smart-ads-mlflow` (modelos, mlruns, cópia anonimizada) | mantido | cerca de R$ 0,5 |
-| `gs://smart-ads-validation-reports` sem as pastas de backup | mantido | centavos |
-| BigQuery `billing_export` | mantido | cerca de R$ 0,5 |
-| Tópicos Pub/Sub | mantidos, sem assinatura | R$ 0 |
+| Código, definição da infraestrutura e este roteiro | este repositório | recriar tudo |
+| Projeto `smart-ads-451319` com APIs, IAM, contas de serviço, tópicos Pub/Sub e a definição dos 3 serviços e 18 jobs | GCP, sem faturamento desde 15/10/2026 | volta a funcionar quando o faturamento for religado (seção 5.0) |
+| Base anonimizada, 20 tabelas em parquet (101 MB) | `~/Desktop/bring_data_arquivo/anon_2026-10/` | estudo, retreino e números do case |
+| Modelos (225 `model.pkl`), artefatos, `mlruns` e `deploy-gate` | `~/Desktop/bring_data_arquivo/mlflow_2026-10/` | os modelos treinados |
+| Histórico do MLflow: runs, métricas, parâmetros e registro de modelos | `mlflow_2026-10/mlflow_2026-10-14.sql.gz` | restaurar o servidor do MLflow |
+| Estado do Terraform e último gatilho do retreino | `mlflow_2026-10/terraform/` e `mlflow_2026-10/retreino/` | voltam para `gs://smart-ads-mlflow/` na reativação |
+| Custo mensal por serviço, de março a outubro de 2026 | `~/Desktop/bring_data_arquivo/custos_gcp/` | case e estimativa de custo |
+
+A pasta Desktop do Mac sincroniza com o iCloud, então o arquivo tem cópia fora da máquina. As
+cópias em `gs://smart-ads-mlflow` podem sumir enquanto o projeto estiver sem faturamento.
 
 Os serviços leem três segredos por `valueFrom`: `slack-bot-token` (os três), `hotmart-basic`
 (`smart-ads-api` e `smart-ads-webhook`) e `dash-zanelato-supabase-url` (`smart-ads-monitoring`).
@@ -124,12 +133,19 @@ existirem de novo. Isso é esperado no estado dormente.
 Pré-requisitos: `gcloud auth login` com dono do projeto, `gcloud config set project smart-ads-451319`,
 `gh auth login` na conta do repositório. As APIs continuam ativas (`estado_2026-10-14/apis_enabled.txt`).
 
+### 5.0 Faturamento, buckets e CI
+
+1. Religar o faturamento: `gcloud billing projects link smart-ads-451319 --billing-account=<ID>`. O ID aparece em `gcloud billing accounts list`.
+2. Se `gs://smart-ads-mlflow` tiver sumido: `gcloud storage buckets create gs://smart-ads-mlflow --location=us-central1 --public-access-prevention` e subir `artifacts/`, `mlruns/`, `deploy-gate/`, `retreino/` e `terraform/` a partir de `~/Desktop/bring_data_arquivo/mlflow_2026-10/`.
+3. Devolver a identidade do CI no GCP: `gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --body projects/12955519745/locations/global/workloadIdentityPools/github/providers/github` (ou rodar `scripts/bootstrap_identidade_ci.sh`). Com ela, o CI volta a baixar os artefatos do modelo e a exigir que existam.
+4. Se o Artifact Registry tiver perdido as imagens, o workflow Deploy reconstrói a partir do código no próximo push (5.4).
+
 ### 5.1 Banco
 
 1. Criar a instância: `gcloud sql instances create smart-ads-db --database-version=POSTGRES_15 --tier=db-f1-micro --region=us-central1 --storage-size=15 --storage-type=SSD`. A versão exata que existia está em `estado_2026-10-14/sql_instance.json` (`databaseVersion`).
 2. Criar os bancos `ledger` e `mlflow` e os usuários que os serviços esperam (`LEDGER_DB_USER` em `services.json`, usuário do mlflow em `jobs.json` do `retreino-mensal`).
 3. Carregar dados: o cliente novo traz os dele pelo ETL normal (`src/data/etl_leads.py`, `src/validation/etl_sales.py`, `src/validation/etl_ad_spend.py`). A base anonimizada (seção 6) serve para análise e retreino local, não para subir em produção.
-4. O `mlflow` pode começar vazio. O histórico de runs antigo está em `~/Desktop/bring_data_arquivo/mlflow_2026-10/` e no dump do cofre enquanto ele existiu.
+4. O histórico de runs volta com `gunzip -c ~/Desktop/bring_data_arquivo/mlflow_2026-10/mlflow_2026-10-14.sql.gz | psql <conexão do banco mlflow>`. Os artefatos dos runs estão na mesma pasta.
 
 ### 5.2 Segredos
 
@@ -258,3 +274,7 @@ Os testes que dependem dos snapshots de `tests/fixtures/` já pulam quando o arq
 | 15/10/2026 | 3.2 | Conferência pedida pela revisão da PR #352: `bring-data-validation-reports`, o valor de `VALIDATION_REPORTS_BUCKET`, não existe (404), e os outros projetos da conta não têm bucket nem dataset do BigQuery. O dado pessoal em bucket estava só em `smart-ads-validation-reports`, limpo no passo 3.2. Scheduler conferido com zero agendadores |
 | 15/10/2026 | 3.2 | Prevenção de acesso público ligada nos três buckets (`smart-ads-mlflow`, `smart-ads-validation-reports`, `smart-ads-cofre-temporario`), e removido o `allUsers` que restava no `smart-ads-validation-reports`. Leitura anônima conferida: 403 |
 | 15/10/2026 | 3.7 | `~/Downloads` conferido: nenhum arquivo com nome ligado ao cliente além dos PDFs do termo. Um CSV de 11/08 com nome e telefone espera confirmação de origem antes de sair ou ficar |
+| 15/10/2026 | 3.7 e 3.10 | Último uso do dump do cofre, em streaming: o CSV de `~/Downloads` tem 2 de 889 telefones na base do cliente, então não é dado do cliente e fica fora do termo. A tentativa de recuperar `captacoes.ad_name` falhou, porque a ordem das linhas do dump não bate com a da exportação. O dump do banco `mlflow` (zero e-mails) foi copiado para o Mac. Depois o cofre foi apagado, objetos e bucket |
+| 15/10/2026 | 3.8 | Pasta da entrega enviada para a lixeira do Drive. O Drive esvazia a lixeira sozinho em 30 dias |
+| 15/10/2026 | 4.1 | Rascunho do e-mail ao cliente criado no Gmail, em resposta à notificação de rescisão |
+| 15/10/2026 | 5.1 a 5.3 | Cópias feitas (seção 4), variável do CI removida e faturamento desvinculado. Conferido: `billingEnabled: False`. Nenhum outro projeto da conta de faturamento teve custo nos últimos 30 dias |
