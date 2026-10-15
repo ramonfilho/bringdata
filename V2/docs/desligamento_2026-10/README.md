@@ -88,10 +88,10 @@ Marcação: `[x]` feito, `[ ]` pendente. Data e resultado de cada um na seção 
 - [x] 3.4 Apagar os 14 segredos (nomes e papel na seção 5.3).
 - [x] 3.5 Apagar as imagens que nenhum serviço ou job usa, e os pacotes de teste (`bring-data-api`, `smart-ads-api-final`, `-fix`, `-strict`, `-apiatest`, `smartads`, `smartads-api`, `hotleads-*`).
 - [x] 3.6 Apagar `gs://smart-ads-451319_cloudbuild` e `gs://run-sources-...` (cache de build, recriados pelo deploy).
-- [x] 3.7 Apagar as cópias locais com dado pessoal no Mac (lista na seção 7).
+- [ ] 3.7 Apagar as cópias locais com dado pessoal no Mac (lista na seção 7). A lista foi apagada em 14/10. Falta confirmar a origem de um CSV de 11/08 em `~/Downloads`.
 - [ ] 3.8 Apagar a pasta compartilhada do Drive com a entrega, depois de o cliente confirmar que baixou.
 - [x] 3.9 Apagar os diretórios de trabalho das sessões do Claude que guardam CSV bruto (`csv_brutos`, `pacote_devclub`).
-- [ ] 3.10 Confirmar que os objetos do cofre temporário foram apagados pela regra de ciclo de vida (ou apagar à mão) e apagar o bucket vazio, antes do prazo contratual. A regra apaga objetos, não o bucket.
+- [ ] 3.10 Confirmar que os objetos do cofre temporário foram apagados pela regra de ciclo de vida (ou apagar à mão) e apagar o bucket vazio, antes do prazo contratual. A regra apaga objetos, não o bucket. Conferir com `gcloud storage buckets describe gs://smart-ads-cofre-temporario --format='value(lifecycle_config)'` (em 15/10/2026: `Delete` aos 24 dias, ativa) e `gcloud storage ls gs://smart-ads-cofre-temporario`. Depois, `gcloud storage buckets delete gs://smart-ads-cofre-temporario`.
 - [x] 3.11 Achado na execução: um run do MLflow tinha o conjunto de treino logado como artefato (`conjunto_de_treino.parquet`, com e-mail, telefone e nome). Apagado do bucket e da cópia local. Os `model.pkl` ficam.
 
 ### Passo 4: registrar
@@ -112,8 +112,12 @@ Marcação: `[x]` feito, `[ ]` pendente. Data e resultado de cada um na seção 
 | BigQuery `billing_export` | mantido | cerca de R$ 0,5 |
 | Tópicos Pub/Sub | mantidos, sem assinatura | R$ 0 |
 
-Os serviços referenciam dois segredos por `valueFrom`. Com os segredos apagados, uma instância
-nova do serviço não sobe até os segredos existirem de novo. Isso é esperado no estado dormente.
+Os serviços leem três segredos por `valueFrom`: `slack-bot-token` (os três), `hotmart-basic`
+(`smart-ads-api` e `smart-ads-webhook`) e `dash-zanelato-supabase-url` (`smart-ads-monitoring`).
+Os jobs leem sete: `ledger-db-password` (nove jobs), `dash-zanelato-supabase-url`,
+`dash-lead-id-salt`, `mlflow-db-password`, `slack-bot-token`, `meta-audiences-token` e
+`railway-db-password`. Com os segredos apagados, uma instância nova não sobe até os segredos
+existirem de novo. Isso é esperado no estado dormente.
 
 ## 5. Como reativar, passo a passo
 
@@ -248,7 +252,7 @@ Os testes que dependem dos snapshots de `tests/fixtures/` já pulam quando o arq
 | 14/10/2026 | 3.9 | `csv_brutos`, `pacote_devclub`, `export_estado` e o estado bruto (com segredos) apagados do scratchpad da sessão |
 | 14/10/2026 | 3.11 | `conjunto_de_treino.parquet` do run `47b0cae6` apagado do bucket e da cópia local |
 | 14/10/2026 | 2.4 | Cópia local do MLflow concluída em `~/Desktop/bring_data_arquivo/mlflow_2026-10/`: 1.720 arquivos de `artifacts` (225 `model.pkl`), 617 de `mlruns`, `deploy-gate`. O `rsync` travou duas vezes e deixou 799 duplicatas com sufixo " 2", removidas. Varredura final da cópia: nenhum e-mail ou coluna de identidade |
-| 14/10/2026 | fim do dia | Pendentes: 3.8 (pasta do Drive, espera o cliente confirmar o download), 3.10 (cofre some sozinho por ciclo de vida até ~07/11, conferir), 4.1 (e-mail ao cliente depois de 3.8 e 3.10) e 4.2 (memória atualizada em 14/10, fechar no fim) |
+| 14/10/2026 | fim do dia | Pendentes: 3.8 (pasta do Drive, espera o cliente confirmar o download), 3.10 (cofre some sozinho pela regra de 24 dias, conferir), 4.1 (e-mail ao cliente depois de 3.8 e 3.10) e 4.2 (memória atualizada em 14/10, fechar no fim) |
 | 15/10/2026 | 2.3 | O filtro de colunas da exportação tinha derrubado colunas sem dado pessoal nas tabelas de `sem_dado_pessoal/` (`ad_name`, `adset_name`, `campaign_name`, `lf_name`). As 10 tabelas foram refeitas do dump do cofre, lido em streaming sem gravar nada em disco: contagem igual ao banco nas 10, zero e-mail e zero telefone. Cópia do bucket atualizada, tamanhos iguais aos locais |
 | 15/10/2026 | 2.4 | Um processo de cópia do MLflow que tinha ficado pendurado desde 14/10 foi encerrado. Conferido: 2.628 arquivos (225 `model.pkl`), nenhuma duplicata, nenhum arquivo escrito depois de 14/10. O `conjunto_de_treino.json` que ficou no run `47b0cae6` é só o resumo do parquet apagado (contagem, nomes de coluna, hash) |
 | 15/10/2026 | 3.2 | Conferência pedida pela revisão da PR #352: `bring-data-validation-reports`, o valor de `VALIDATION_REPORTS_BUCKET`, não existe (404), e os outros projetos da conta não têm bucket nem dataset do BigQuery. O dado pessoal em bucket estava só em `smart-ads-validation-reports`, limpo no passo 3.2. Scheduler conferido com zero agendadores |
