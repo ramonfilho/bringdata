@@ -16,6 +16,7 @@ from typing import Optional
 
 import pandas as pd
 
+from src.data import base_anonimizada
 from src.data.analytics_connection import open_analytics_connection
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,8 @@ def read_pesquisa(
     Returns:
         DataFrame com as mesmas colunas do df_pesquisa dumpado. Vazio se nada.
     """
+    if conn is None and base_anonimizada.diretorio():
+        return base_anonimizada.read_pesquisa_anon(source, include_utm=include_utm, as_of=as_of)
     own = conn is None
     conn = conn or open_analytics_connection()
     try:
