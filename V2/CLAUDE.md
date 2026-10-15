@@ -2,7 +2,7 @@
 
 Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
-> **ESTADO DO PROJETO (desde 14/10/2026): DESLIGADO, em modo dormente.** O contrato com o cliente
+> **ESTADO DO PROJETO (desde 14/10/2026): DESLIGADO, e sem faturamento no GCP desde 15/10/2026.** O contrato com o cliente
 > terminou em 03/10/2026. Antes de qualquer tarefa que toque Cloud Run, Cloud SQL, Scheduler,
 > segredos, buckets ou dados, leia `docs/desligamento_2026-10/README.md`: ele diz o que foi
 > desligado, o que foi apagado por obrigação contratual, o que ficou guardado e como reativar.
