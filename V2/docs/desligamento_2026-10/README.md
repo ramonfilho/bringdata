@@ -223,10 +223,24 @@ do criativo, como `AD0150`) está preenchido em 74,5% das captações.
 | `sem_dado_pessoal/leads_provenance.parquet` | `analytics.leads_provenance` | fonte e prioridade de cada lead, sem a chave `event_id`: serve para contagem agregada e não cruza com as outras tabelas |
 
 **Como carregar:** `pandas.read_parquet("leads_anon.parquet")`. O JSON da pesquisa está na
-coluna `survey_responses` como texto, `json.loads` por linha. O pipeline de treino lê o banco
-(`src/data/leads_reader.py`), então para treinar com a base anonimizada é preciso um leitor de
-parquet que entregue o mesmo shape de `read_pesquisa` e `read_sales`, usando `pessoa_id` no
-lugar do e-mail.
+coluna `survey_responses` como texto, `json.loads` por linha.
+
+**Como treinar com ela:** os leitores do banco (`read_pesquisa`, `read_sales` e `read_tmb_risk`)
+desviam para a base quando a variável `BASE_ANON_DIR` aponta para a pasta
+(`src/data/base_anonimizada.py`). O `pessoa_id` entra no lugar do e-mail, e o MLflow grava num
+arquivo local:
+
+```bash
+cd V2
+BASE_ANON_DIR=~/Desktop/bring_data_arquivo/anon_2026-10 \
+MLFLOW_TRACKING_URI=sqlite:///$HOME/Desktop/bring_data_arquivo/mlflow_local.db \
+python3 -m src.train_pipeline --leads-source=db --sales-source=db --no-api-data
+```
+
+Rodado em 15/10/2026 num Mac, em pouco mais de 3 minutos: 401.282 leads e 5.901 compradores depois
+do casamento, AUC de 0,7165 (intervalo de 95% de 0,7027 a 0,7305), lift de 3,24 nos 10% de nota
+mais alta e decis 100% monotônicos. O casamento lead-venda é só por e-mail, porque a base não tem
+telefone.
 
 **Limitações:** não cruza com nenhuma fonte nova (não há e-mail). Qualquer coluna derivada de
 identidade (telefone com 8 dígitos, hash de e-mail) foi removida.

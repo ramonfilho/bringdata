@@ -60,7 +60,14 @@ def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
     Sem `gcloud` no PATH (Cloud Run Job de retreino, que roda na imagem da API),
     NÃO levanta: registra um aviso e devolve None, e a conexão do MLflow falha
     alto sozinha logo adiante se a instância estiver parada.
+
+    Com MLFLOW_TRACKING_URI local (file:// ou sqlite), o treino não usa o Cloud SQL e a
+    checagem é pulada. É o caso do treino com a base anonimizada, com o projeto sem banco.
     """
+    _uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+    if _uri.startswith(("file:", "sqlite:", "/")):
+        logger.info("[mlflow] MLFLOW_TRACKING_URI local (%s); pulo a checagem do Cloud SQL", _uri)
+        return None
     import subprocess
     try:
         result = subprocess.run(
@@ -107,8 +114,11 @@ def register_mlflow_cleanup_reminder(project_id: str = _MLFLOW_SQL_PROJECT,
     """Registra atexit que lembra de desligar Cloud SQL após o treino.
 
     Não automatiza o stop — outras sessões podem estar usando MLflow em paralelo.
-    Só imprime lembrete no final do processo.
+    Só imprime lembrete no final do processo. Com MLflow local não há Cloud SQL envolvido
+    e o lembrete não é registrado.
     """
+    if os.environ.get("MLFLOW_TRACKING_URI", "").startswith(("file:", "sqlite:", "/")):
+        return
     import atexit
 
     def _reminder():

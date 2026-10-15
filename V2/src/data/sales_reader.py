@@ -21,6 +21,7 @@ from typing import Optional, Sequence
 
 import pandas as pd
 
+from src.data import base_anonimizada
 from src.data.analytics_connection import open_analytics_connection
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,8 @@ def read_sales(
         DataFrame com colunas email, telefone, nome, sale_value, sale_date,
         origem, status, product_name. Vazio se não houver vendas.
     """
+    if conn is None and base_anonimizada.diretorio():
+        return base_anonimizada.read_sales_anon(start, end, gateways=gateways, as_of=as_of)
     where = ["client_id = :client_id"]
     params = {"client_id": client_id}
     if start:

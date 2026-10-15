@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from src.data import base_anonimizada
 from src.data.analytics_connection import open_analytics_connection
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ TABLE = "analytics.sales_tmb_risk"
 def read_tmb_risk(client_id: str = "devclub", conn=None) -> dict:
     """Devolve {email_norm → grau_de_risco} da satélite. {} se a tabela não existe
     (satélite ainda não populada → treino trata como 'sem lookup')."""
+    if conn is None and base_anonimizada.diretorio():
+        return base_anonimizada.read_tmb_risk_anon()
     own = conn is None
     conn = conn or open_analytics_connection()
     try:
