@@ -11,7 +11,8 @@ ainda falta fazer e como acordar tudo de novo.
   memória de sessão do Claude, não neste repositório.
 - Obrigações que sobraram para a Bring Data: desligar sistemas e integrações, eliminar todo
   dado pessoal do cliente dentro do prazo contratual, e manter apenas o que o termo permite:
-  modelos treinados e uma base anonimizada (sem nome, e-mail, telefone, IP ou identificador).
+  modelos treinados e uma base anonimizada (sem nome, e-mail, telefone ou IP: cada pessoa virou
+  um código, `pessoa_id`, que não volta a ser e-mail).
 - O projeto GCP fica vivo, dormindo, por uns R$ 3 por mês. Tudo que custa parado foi apagado
   ou será apagado dentro do prazo. Tudo que é preciso para reativar está guardado (seção 5).
 - O que nunca volta: o dado pessoal do cliente antigo e as credenciais dele. Reativação é com
@@ -29,7 +30,7 @@ R$ 236 brutos, R$ 205 líquidos.
 | Cloud Run, jobs | 18 | dentro do valor acima | Ficam, nunca executam sozinhos |
 | Cloud Scheduler | 27 | R$ 13 | Apagados, definição guardada em `estado_2026-10-14/schedulers.json` |
 | Cloud SQL `smart-ads-db` (db-f1-micro, 15 GB SSD, bancos `ledger` 4 GB, `mlflow`, `dash`) | 1 | R$ 64 | Apagada depois dos dumps |
-| Artifact Registry (`gcr.io`: 482 imagens de `smart-ads-api`, 9 de `smart-ads-treino`, 7 pacotes de teste) | 15,9 GiB | R$ 13 | Fica só a imagem em uso por serviço e por job |
+| Artifact Registry (`gcr.io`: 482 imagens de `smart-ads-api`, 9 de `smart-ads-treino` e os pacotes de teste) | 15,9 GiB | R$ 13 | Fica só a imagem em uso por serviço e por job (14 manifests, mais 13 filhos deles por arquitetura) |
 | Secret Manager | 14 segredos | R$ 4 | Apagados, nomes e papel na seção 5.3 |
 | Buckets `smart-ads-mlflow` (1,5 GiB), `smart-ads-validation-reports` (550 MiB), `_cloudbuild` (68 MiB), `run-sources` (vazio) | 4 | menos de R$ 1 | Modelos ficam, backups com dado pessoal saem |
 | Pub/Sub (`lead-capture-ingest` + DLQ, 1 assinatura) | 2 tópicos | R$ 0 | Assinaturas apagadas, tópicos ficam |
@@ -85,12 +86,12 @@ Marcação: `[x]` feito, `[ ]` pendente. Data e resultado de cada um na seção 
 - [x] 3.2 Apagar os objetos com dado pessoal nos buckets: `smart-ads-validation-reports/backups/`, `ledger_etapa5_backup/`, `vendas/` (xlsx da TMB), `validation/` (20 relatórios xlsx com a aba de vendas nominais) e `smart-ads-mlflow/backups/`. No `validation-reports` sobrou só `monitoring/critical_alerts/state.json`.
 - [x] 3.3 Apagar os 27 agendadores (definição já guardada).
 - [x] 3.4 Apagar os 14 segredos (nomes e papel na seção 5.3).
-- [x] 3.5 Apagar as imagens que nenhum serviço ou job usa, e os 7 pacotes de teste (`bring-data-api`, `smart-ads-api-final`, `-fix`, `-strict`, `-apiatest`, `smartads`, `smartads-api`, `hotleads-*`).
+- [x] 3.5 Apagar as imagens que nenhum serviço ou job usa, e os pacotes de teste (`bring-data-api`, `smart-ads-api-final`, `-fix`, `-strict`, `-apiatest`, `smartads`, `smartads-api`, `hotleads-*`).
 - [x] 3.6 Apagar `gs://smart-ads-451319_cloudbuild` e `gs://run-sources-...` (cache de build, recriados pelo deploy).
 - [x] 3.7 Apagar as cópias locais com dado pessoal no Mac (lista na seção 7).
 - [ ] 3.8 Apagar a pasta compartilhada do Drive com a entrega, depois de o cliente confirmar que baixou.
 - [x] 3.9 Apagar os diretórios de trabalho das sessões do Claude que guardam CSV bruto (`csv_brutos`, `pacote_devclub`).
-- [ ] 3.10 Confirmar que o cofre temporário foi apagado pela regra de ciclo de vida, ou apagar à mão.
+- [ ] 3.10 Confirmar que os objetos do cofre temporário foram apagados pela regra de ciclo de vida (ou apagar à mão) e apagar o bucket vazio, antes do prazo contratual. A regra apaga objetos, não o bucket.
 - [x] 3.11 Achado na execução: um run do MLflow tinha o conjunto de treino logado como artefato (`conjunto_de_treino.parquet`, com e-mail, telefone e nome). Apagado do bucket e da cópia local. Os `model.pkl` ficam.
 
 ### Passo 4: registrar
@@ -150,7 +151,7 @@ mostra como o `.env` local era montado.
 2. Ou, sem push, reabrir o que já está deployado: `gcloud run services update <serviço> --region us-central1 --ingress all`.
 3. Devolver o invoker público ao webhook: `gcloud run services add-iam-policy-binding smart-ads-webhook --region us-central1 --member=allUsers --role=roles/run.invoker`. Os outros dois serviços são chamados só pela conta `scheduler-invoker@...` (ver `iam_*.json`).
 4. Variáveis de ambiente: `gcloud run services update ... --update-env-vars` mescla com as existentes. As que estão redigidas em `services.json` precisam de valor novo.
-5. Os relatórios de validação do monitoramento (`api/routers/monitoring.py`) gravam no bucket da variável `VALIDATION_REPORTS_BUCKET`, que vale `bring-data-validation-reports`. Esse bucket não existe neste projeto (404 em 15/10/2026). O que existe é `smart-ads-validation-reports`, o mesmo dos alertas críticos (`src/monitoring/critical_alerts.py`). Na reativação, apontar a variável para o bucket que existir.
+5. Os relatórios de validação do monitoramento (`api/routers/monitoring.py`) gravam no bucket da variável `VALIDATION_REPORTS_BUCKET`, que vale `bring-data-validation-reports`. Esse bucket não existe neste projeto (404 em 15/10/2026). O que existe é `smart-ads-validation-reports`, o mesmo dos alertas críticos (`src/monitoring/critical_alerts.py`). Na reativação, apontar a variável para o bucket que existir. Os roteiros antigos (`api/SETUP_VALIDATION.md` e `configs/weekly_validation_config.yaml`) mandam dar leitura pública ao bucket (`allUsers:objectViewer`). Não repetir: os relatórios trazem vendas com e-mail. Desde 15/10/2026 os três buckets têm a prevenção de acesso público ligada, e o GCS recusa um `allUsers` novo.
 
 ### 5.5 Agendadores
 
@@ -251,3 +252,5 @@ Os testes que dependem dos snapshots de `tests/fixtures/` já pulam quando o arq
 | 15/10/2026 | 2.3 | O filtro de colunas da exportação tinha derrubado colunas sem dado pessoal nas tabelas de `sem_dado_pessoal/` (`ad_name`, `adset_name`, `campaign_name`, `lf_name`). As 10 tabelas foram refeitas do dump do cofre, lido em streaming sem gravar nada em disco: contagem igual ao banco nas 10, zero e-mail e zero telefone. Cópia do bucket atualizada, tamanhos iguais aos locais |
 | 15/10/2026 | 2.4 | Um processo de cópia do MLflow que tinha ficado pendurado desde 14/10 foi encerrado. Conferido: 2.628 arquivos (225 `model.pkl`), nenhuma duplicata, nenhum arquivo escrito depois de 14/10. O `conjunto_de_treino.json` que ficou no run `47b0cae6` é só o resumo do parquet apagado (contagem, nomes de coluna, hash) |
 | 15/10/2026 | 3.2 | Conferência pedida pela revisão da PR #352: `bring-data-validation-reports`, o valor de `VALIDATION_REPORTS_BUCKET`, não existe (404), e os outros projetos da conta não têm bucket nem dataset do BigQuery. O dado pessoal em bucket estava só em `smart-ads-validation-reports`, limpo no passo 3.2. Scheduler conferido com zero agendadores |
+| 15/10/2026 | 3.2 | Prevenção de acesso público ligada nos três buckets (`smart-ads-mlflow`, `smart-ads-validation-reports`, `smart-ads-cofre-temporario`), e removido o `allUsers` que restava no `smart-ads-validation-reports`. Leitura anônima conferida: 403 |
+| 15/10/2026 | 3.7 | `~/Downloads` conferido: nenhum arquivo com nome ligado ao cliente além dos PDFs do termo. Um CSV de 11/08 com nome e telefone espera confirmação de origem antes de sair ou ficar |
