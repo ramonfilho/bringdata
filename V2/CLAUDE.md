@@ -2,6 +2,12 @@
 
 Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
+> **ESTADO DO PROJETO (desde 14/10/2026): DESLIGADO, em modo dormente.** O contrato com o cliente
+> terminou em 03/10/2026. Antes de qualquer tarefa que toque Cloud Run, Cloud SQL, Scheduler,
+> segredos, buckets ou dados, leia `docs/desligamento_2026-10/README.md`: ele diz o que foi
+> desligado, o que foi apagado por obrigação contratual, o que ficou guardado e como reativar.
+> O roteiro abaixo (PLANO_EXECUCAO e companhia) descreve o sistema como operava até então.
+
 **Regra inegociável:** o `PLANO_EXECUCAO.md` define a ordem de execução. Seguir passo a passo, na sequência documentada. Nunca reordenar, pular ou antecipar itens sem instrução explícita do usuário.
 
 **Protocolo por item de safeguard:** cada T1-x / T2-x / T3-x é implementado, testado, commitado e deployado individualmente antes de avançar para o próximo. Ver protocolo completo em `docs/PLANO_SAFEGUARD.md` — seção "Protocolo obrigatório por item".

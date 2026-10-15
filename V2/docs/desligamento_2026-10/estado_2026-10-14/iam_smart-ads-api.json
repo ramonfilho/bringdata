@@ -1,0 +1,14 @@
+{
+  "bindings": [
+    {
+      "members": [
+        "serviceAccount:scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com",
+        "serviceAccount:smart-ads-451319@appspot.gserviceaccount.com",
+        "user:<dono-do-projeto>"
+      ],
+      "role": "roles/run.invoker"
+    }
+  ],
+  "etag": "BwZcAhh5fzk=",
+  "version": 1
+}

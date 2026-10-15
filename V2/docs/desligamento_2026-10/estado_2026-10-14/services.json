@@ -1,0 +1,889 @@
+[
+ {
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "568.0.0",
+    "run.googleapis.com/ingress": "all",
+    "run.googleapis.com/ingress-status": "all",
+    "run.googleapis.com/operation-id": "a2a5b300-432a-42ad-81eb-a812f6ed95de",
+    "run.googleapis.com/urls": "[\"https://smart-ads-api-12955519745.us-central1.run.app\",\"https://smart-ads-api-gazrm25mda-uc.a.run.app\"]",
+    "serving.knative.dev/creator": "<dono-do-projeto>",
+    "serving.knative.dev/lastModifier": "github-deployer@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "creationTimestamp": "2025-09-30T11:03:44.423393Z",
+   "generation": 1239,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1"
+   },
+   "name": "smart-ads-api",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZcAk6mMXc",
+   "selfLink": "/apis/serving.knative.dev/v1/namespaces/12955519745/services/smart-ads-api",
+   "uid": "fa91234f-1fa4-4b07-8769-b764436bd550"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "autoscaling.knative.dev/maxScale": "100",
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "568.0.0",
+      "run.googleapis.com/cloudsql-instances": "",
+      "run.googleapis.com/startup-cpu-boost": "true"
+     },
+     "labels": {
+      "run.googleapis.com/startupProbeType": "Custom"
+     },
+     "name": "smart-ads-api-01236-qik"
+    },
+    "spec": {
+     "containerConcurrency": 80,
+     "containers": [
+      {
+       "env": [
+        {
+         "name": "ENVIRONMENT",
+         "value": "production"
+        },
+        {
+         "name": "META_ACCESS_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "VALIDATION_REPORTS_BUCKET",
+         "value": "bring-data-validation-reports"
+        },
+        {
+         "name": "SLACK_WEBHOOK_URL",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GURU_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "TZ",
+         "value": "America/Sao_Paulo"
+        },
+        {
+         "name": "RAILWAY_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PORT",
+         "value": "11594"
+        },
+        {
+         "name": "RAILWAY_DB_NAME",
+         "value": "railway"
+        },
+        {
+         "name": "RAILWAY_DB_USER",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_PIXEL_ID",
+         "value": "1937807493703815"
+        },
+        {
+         "name": "SLACK_BOT_TOKEN",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "3",
+           "name": "slack-bot-token"
+          }
+         }
+        },
+        {
+         "name": "SLACK_USER_DM",
+         "value": "U0A9ZB17B2M"
+        },
+        {
+         "name": "CRITICAL_ALERTS_DRY_RUN",
+         "value": "false"
+        },
+        {
+         "name": "PUBSUB_CAPI_ENABLED",
+         "value": "true"
+        },
+        {
+         "name": "SENDFLOW_SENDTOK",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_TARGET",
+         "value": "cloudsql"
+        },
+        {
+         "name": "LEDGER_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_DB_PORT",
+         "value": "5432"
+        },
+        {
+         "name": "LEDGER_DB_NAME",
+         "value": "ledger"
+        },
+        {
+         "name": "LEDGER_DB_USER",
+         "value": "ledger_app"
+        },
+        {
+         "name": "LEDGER_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_READ_SOURCE",
+         "value": "cloudsql"
+        },
+        {
+         "name": "DEPLOY_GIT_SHA",
+         "value": "777b1b1"
+        },
+        {
+         "name": "DEPLOY_GIT_MERGED",
+         "value": "true"
+        },
+        {
+         "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_SECRET",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_REFRESH_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+         "value": "C09VD6J8A72"
+        },
+        {
+         "name": "SLACK_VALIDATION_DM_CHANNEL",
+         "value": "D0A9USV3XEX"
+        },
+        {
+         "name": "LEDGER_DECIL_READ_SOURCE",
+         "value": "ledger"
+        },
+        {
+         "name": "TMB_API_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LAUNCHES_SOURCE",
+         "value": "table"
+        },
+        {
+         "name": "REFERENCE_SOURCE",
+         "value": "rolling"
+        },
+        {
+         "name": "HOTLEADS_CRON_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "HOTLEADS_WEBHOOK_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "HOTLEADS_PUBLIC_URL",
+         "value": "https://smart-ads-webhook-gazrm25mda-uc.a.run.app"
+        },
+        {
+         "name": "HOTMART_BASIC",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "latest",
+           "name": "hotmart-basic"
+          }
+         }
+        },
+        {
+         "name": "SCORING_EM_LOTE",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "API_INTERNAL_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "CLOUD_RUN_COST_ALERT_BRL",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        }
+       ],
+       "image": "gcr.io/smart-ads-451319/smart-ads-api:v20260921_180343",
+       "ports": [
+        {
+         "containerPort": 8080,
+         "name": "http1"
+        }
+       ],
+       "resources": {
+        "limits": {
+         "cpu": "2",
+         "memory": "2Gi"
+        }
+       },
+       "startupProbe": {
+        "failureThreshold": 3,
+        "periodSeconds": 240,
+        "tcpSocket": {
+         "port": 8080
+        },
+        "timeoutSeconds": 240
+       }
+      }
+     ],
+     "serviceAccountName": "smart-ads-451319@appspot.gserviceaccount.com",
+     "timeoutSeconds": 600
+    }
+   },
+   "traffic": [
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-api-01236-qik"
+    },
+    {
+     "revisionName": "smart-ads-api-01225-yep",
+     "tag": "canary-1789743472"
+    },
+    {
+     "revisionName": "smart-ads-api-01236-qik",
+     "tag": "canary-1790013928"
+    }
+   ]
+  },
+  "status": {
+   "address": {
+    "url": "https://smart-ads-api-gazrm25mda-uc.a.run.app"
+   },
+   "latestCreatedRevisionName": "smart-ads-api-01236-qik",
+   "latestReadyRevisionName": "smart-ads-api-01236-qik",
+   "observedGeneration": 1239,
+   "traffic": [
+    {
+     "revisionName": "smart-ads-api-01225-yep",
+     "tag": "canary-1789743472",
+     "url": "https://canary-1789743472---smart-ads-api-gazrm25mda-uc.a.run.app"
+    },
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-api-01236-qik",
+     "tag": "canary-1790013928",
+     "url": "https://canary-1790013928---smart-ads-api-gazrm25mda-uc.a.run.app"
+    }
+   ],
+   "url": "https://smart-ads-api-gazrm25mda-uc.a.run.app"
+  }
+ },
+ {
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "568.0.0",
+    "run.googleapis.com/ingress": "all",
+    "run.googleapis.com/ingress-status": "all",
+    "run.googleapis.com/maxScale": "100",
+    "run.googleapis.com/operation-id": "9193e2a4-6339-461a-9625-28f91de05dd2",
+    "run.googleapis.com/urls": "[\"https://smart-ads-monitoring-12955519745.us-central1.run.app\",\"https://smart-ads-monitoring-gazrm25mda-uc.a.run.app\"]",
+    "serving.knative.dev/creator": "<dono-do-projeto>",
+    "serving.knative.dev/lastModifier": "github-deployer@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "creationTimestamp": "2026-07-24T14:27:52.910812Z",
+   "generation": 139,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1"
+   },
+   "name": "smart-ads-monitoring",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZcAk/+Q6E",
+   "selfLink": "/apis/serving.knative.dev/v1/namespaces/12955519745/services/smart-ads-monitoring",
+   "uid": "04e9f160-698f-470c-bedb-865b570f923c"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "autoscaling.knative.dev/maxScale": "100",
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "568.0.0",
+      "run.googleapis.com/cloudsql-instances": "",
+      "run.googleapis.com/startup-cpu-boost": "true"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "cadlgetpom",
+      "run.googleapis.com/startupProbeType": "Custom"
+     }
+    },
+    "spec": {
+     "containerConcurrency": 80,
+     "containers": [
+      {
+       "env": [
+        {
+         "name": "ENVIRONMENT",
+         "value": "production"
+        },
+        {
+         "name": "META_ACCESS_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "VALIDATION_REPORTS_BUCKET",
+         "value": "bring-data-validation-reports"
+        },
+        {
+         "name": "SLACK_WEBHOOK_URL",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GURU_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "TZ",
+         "value": "America/Sao_Paulo"
+        },
+        {
+         "name": "RAILWAY_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PORT",
+         "value": "11594"
+        },
+        {
+         "name": "RAILWAY_DB_NAME",
+         "value": "railway"
+        },
+        {
+         "name": "RAILWAY_DB_USER",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_PIXEL_ID",
+         "value": "1937807493703815"
+        },
+        {
+         "name": "SLACK_BOT_TOKEN",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "3",
+           "name": "slack-bot-token"
+          }
+         }
+        },
+        {
+         "name": "SLACK_USER_DM",
+         "value": "U0A9ZB17B2M"
+        },
+        {
+         "name": "CRITICAL_ALERTS_DRY_RUN",
+         "value": "false"
+        },
+        {
+         "name": "PUBSUB_CAPI_ENABLED",
+         "value": "true"
+        },
+        {
+         "name": "SENDFLOW_SENDTOK",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_TARGET",
+         "value": "cloudsql"
+        },
+        {
+         "name": "LEDGER_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_DB_PORT",
+         "value": "5432"
+        },
+        {
+         "name": "LEDGER_DB_NAME",
+         "value": "ledger"
+        },
+        {
+         "name": "LEDGER_DB_USER",
+         "value": "ledger_app"
+        },
+        {
+         "name": "LEDGER_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_READ_SOURCE",
+         "value": "cloudsql"
+        },
+        {
+         "name": "DEPLOY_GIT_SHA",
+         "value": "777b1b1"
+        },
+        {
+         "name": "DEPLOY_GIT_MERGED",
+         "value": "true"
+        },
+        {
+         "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_SECRET",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_REFRESH_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+         "value": "C09VD6J8A72"
+        },
+        {
+         "name": "SLACK_VALIDATION_DM_CHANNEL",
+         "value": "D0A9USV3XEX"
+        },
+        {
+         "name": "LEDGER_DECIL_READ_SOURCE",
+         "value": "ledger"
+        },
+        {
+         "name": "TMB_API_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LAUNCHES_SOURCE",
+         "value": "table"
+        },
+        {
+         "name": "REFERENCE_SOURCE",
+         "value": "frozen"
+        },
+        {
+         "name": "SUPABASE_ZANELATO_URL",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "latest",
+           "name": "dash-zanelato-supabase-url"
+          }
+         }
+        }
+       ],
+       "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:cc867e9c0243d7ed0da8614619b9d39e6f097583b6d330518d0b846197d3c670",
+       "ports": [
+        {
+         "containerPort": 8080,
+         "name": "http1"
+        }
+       ],
+       "resources": {
+        "limits": {
+         "cpu": "2",
+         "memory": "2Gi"
+        }
+       },
+       "startupProbe": {
+        "failureThreshold": 3,
+        "periodSeconds": 240,
+        "tcpSocket": {
+         "port": 8080
+        },
+        "timeoutSeconds": 240
+       }
+      }
+     ],
+     "serviceAccountName": "smart-ads-451319@appspot.gserviceaccount.com",
+     "timeoutSeconds": 600
+    }
+   },
+   "traffic": [
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-monitoring-00071-f5j"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00003-mim",
+     "tag": "canaryjul24"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00005-suz",
+     "tag": "canarywild"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00012-dij",
+     "tag": "rolling"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00017-ror",
+     "tag": "prev136"
+    }
+   ]
+  },
+  "status": {
+   "address": {
+    "url": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+   },
+   "latestCreatedRevisionName": "smart-ads-monitoring-00071-f5j",
+   "latestReadyRevisionName": "smart-ads-monitoring-00071-f5j",
+   "observedGeneration": 139,
+   "traffic": [
+    {
+     "revisionName": "smart-ads-monitoring-00003-mim",
+     "tag": "canaryjul24",
+     "url": "https://canaryjul24---smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00005-suz",
+     "tag": "canarywild",
+     "url": "https://canarywild---smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00012-dij",
+     "tag": "rolling",
+     "url": "https://rolling---smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+    },
+    {
+     "revisionName": "smart-ads-monitoring-00017-ror",
+     "tag": "prev136",
+     "url": "https://prev136---smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+    },
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-monitoring-00071-f5j"
+    }
+   ],
+   "url": "https://smart-ads-monitoring-gazrm25mda-uc.a.run.app"
+  }
+ },
+ {
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+   "annotations": {
+    "run.googleapis.com/client-name": "gcloud",
+    "run.googleapis.com/client-version": "568.0.0",
+    "run.googleapis.com/ingress": "all",
+    "run.googleapis.com/ingress-status": "all",
+    "run.googleapis.com/maxScale": "10",
+    "run.googleapis.com/operation-id": "cb4f84ff-c41e-4fe7-a925-5e7a6d5e4cbd",
+    "run.googleapis.com/urls": "[\"https://smart-ads-webhook-12955519745.us-central1.run.app\",\"https://smart-ads-webhook-gazrm25mda-uc.a.run.app\"]",
+    "serving.knative.dev/creator": "<dono-do-projeto>",
+    "serving.knative.dev/lastModifier": "github-deployer@smart-ads-451319.iam.gserviceaccount.com"
+   },
+   "creationTimestamp": "2026-08-05T22:31:27.600260Z",
+   "generation": 113,
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1"
+   },
+   "name": "smart-ads-webhook",
+   "namespace": "12955519745",
+   "resourceVersion": "AAZcAlFYR10",
+   "selfLink": "/apis/serving.knative.dev/v1/namespaces/12955519745/services/smart-ads-webhook",
+   "uid": "e742d0e8-c118-454e-80f6-441e49e4bd27"
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "autoscaling.knative.dev/maxScale": "4",
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "568.0.0",
+      "run.googleapis.com/cloudsql-instances": "",
+      "run.googleapis.com/startup-cpu-boost": "true"
+     },
+     "labels": {
+      "client.knative.dev/nonce": "qxwphxbtxn",
+      "run.googleapis.com/startupProbeType": "Custom"
+     }
+    },
+    "spec": {
+     "containerConcurrency": 80,
+     "containers": [
+      {
+       "env": [
+        {
+         "name": "ENVIRONMENT",
+         "value": "production"
+        },
+        {
+         "name": "META_ACCESS_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "VALIDATION_REPORTS_BUCKET",
+         "value": "bring-data-validation-reports"
+        },
+        {
+         "name": "SLACK_WEBHOOK_URL",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GURU_DATA_SOURCE",
+         "value": "api"
+        },
+        {
+         "name": "TZ",
+         "value": "America/Sao_Paulo"
+        },
+        {
+         "name": "RAILWAY_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PORT",
+         "value": "11594"
+        },
+        {
+         "name": "RAILWAY_DB_NAME",
+         "value": "railway"
+        },
+        {
+         "name": "RAILWAY_DB_USER",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "RAILWAY_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "META_PIXEL_ID",
+         "value": "1937807493703815"
+        },
+        {
+         "name": "SLACK_BOT_TOKEN",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "3",
+           "name": "slack-bot-token"
+          }
+         }
+        },
+        {
+         "name": "SLACK_USER_DM",
+         "value": "U0A9ZB17B2M"
+        },
+        {
+         "name": "CRITICAL_ALERTS_DRY_RUN",
+         "value": "false"
+        },
+        {
+         "name": "PUBSUB_CAPI_ENABLED",
+         "value": "true"
+        },
+        {
+         "name": "SENDFLOW_SENDTOK",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_TARGET",
+         "value": "cloudsql"
+        },
+        {
+         "name": "LEDGER_DB_HOST",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_DB_PORT",
+         "value": "5432"
+        },
+        {
+         "name": "LEDGER_DB_NAME",
+         "value": "ledger"
+        },
+        {
+         "name": "LEDGER_DB_USER",
+         "value": "ledger_app"
+        },
+        {
+         "name": "LEDGER_DB_PASSWORD",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LEDGER_READ_SOURCE",
+         "value": "cloudsql"
+        },
+        {
+         "name": "DEPLOY_GIT_SHA",
+         "value": "777b1b1"
+        },
+        {
+         "name": "DEPLOY_GIT_MERGED",
+         "value": "true"
+        },
+        {
+         "name": "GOOGLE_ADS_DEVELOPER_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_CLIENT_SECRET",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_REFRESH_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "UTM_QUALITY_TRAFEGO_CHANNEL",
+         "value": "C09VD6J8A72"
+        },
+        {
+         "name": "SLACK_VALIDATION_DM_CHANNEL",
+         "value": "D0A9USV3XEX"
+        },
+        {
+         "name": "LEDGER_DECIL_READ_SOURCE",
+         "value": "ledger"
+        },
+        {
+         "name": "TMB_API_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "LAUNCHES_SOURCE",
+         "value": "table"
+        },
+        {
+         "name": "REFERENCE_SOURCE",
+         "value": "rolling"
+        },
+        {
+         "name": "HOTLEADS_CRON_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "HOTLEADS_WEBHOOK_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "HOTLEADS_PUBLIC_URL",
+         "value": "https://smart-ads-api-gazrm25mda-uc.a.run.app"
+        },
+        {
+         "name": "HOTMART_BASIC",
+         "valueFrom": {
+          "secretKeyRef": {
+           "key": "latest",
+           "name": "hotmart-basic"
+          }
+         }
+        },
+        {
+         "name": "SCORING_EM_LOTE",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "API_INTERNAL_TOKEN",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        },
+        {
+         "name": "SERVICE_ROLE",
+         "value": "<redigido: valor vivia só no serviço, recriar no cliente novo>"
+        }
+       ],
+       "image": "gcr.io/smart-ads-451319/smart-ads-api@sha256:cc867e9c0243d7ed0da8614619b9d39e6f097583b6d330518d0b846197d3c670",
+       "ports": [
+        {
+         "containerPort": 8080,
+         "name": "http1"
+        }
+       ],
+       "resources": {
+        "limits": {
+         "cpu": "2",
+         "memory": "2Gi"
+        }
+       },
+       "startupProbe": {
+        "failureThreshold": 3,
+        "periodSeconds": 240,
+        "tcpSocket": {
+         "port": 8080
+        },
+        "timeoutSeconds": 240
+       }
+      }
+     ],
+     "serviceAccountName": "smart-ads-451319@appspot.gserviceaccount.com",
+     "timeoutSeconds": 600
+    }
+   },
+   "traffic": [
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-webhook-00057-j7d"
+    }
+   ]
+  },
+  "status": {
+   "address": {
+    "url": "https://smart-ads-webhook-gazrm25mda-uc.a.run.app"
+   },
+   "latestCreatedRevisionName": "smart-ads-webhook-00057-j7d",
+   "latestReadyRevisionName": "smart-ads-webhook-00057-j7d",
+   "observedGeneration": 113,
+   "traffic": [
+    {
+     "percent": 100,
+     "revisionName": "smart-ads-webhook-00057-j7d"
+    }
+   ],
+   "url": "https://smart-ads-webhook-gazrm25mda-uc.a.run.app"
+  }
+ }
+]
