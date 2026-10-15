@@ -150,6 +150,7 @@ mostra como o `.env` local era montado.
 2. Ou, sem push, reabrir o que já está deployado: `gcloud run services update <serviço> --region us-central1 --ingress all`.
 3. Devolver o invoker público ao webhook: `gcloud run services add-iam-policy-binding smart-ads-webhook --region us-central1 --member=allUsers --role=roles/run.invoker`. Os outros dois serviços são chamados só pela conta `scheduler-invoker@...` (ver `iam_*.json`).
 4. Variáveis de ambiente: `gcloud run services update ... --update-env-vars` mescla com as existentes. As que estão redigidas em `services.json` precisam de valor novo.
+5. Os relatórios de validação do monitoramento (`api/routers/monitoring.py`) gravam no bucket da variável `VALIDATION_REPORTS_BUCKET`, que vale `bring-data-validation-reports`. Esse bucket não existe neste projeto (404 em 15/10/2026). O que existe é `smart-ads-validation-reports`, o mesmo dos alertas críticos (`src/monitoring/critical_alerts.py`). Na reativação, apontar a variável para o bucket que existir.
 
 ### 5.5 Agendadores
 
@@ -229,7 +230,7 @@ Os testes que dependem dos snapshots de `tests/fixtures/` já pulam quando o arq
 | Data | Passo | Resultado |
 |---|---|---|
 | 14/10/2026 | 0 | Inventário feito, pasta `estado_2026-10-14/` gravada, plano escrito |
-| 14/10/2026 | 1.1 a 1.5 | 23 agendadores pausados (3 já estavam), ingress `internal` nos 3 serviços, `allUsers` removido do webhook, assinatura Pub/Sub apagada, workflow Deploy `disabled_manually` |
+| 14/10/2026 | 1.1 a 1.5 | 23 agendadores pausados (4 já estavam), ingress `internal` nos 3 serviços, `allUsers` removido do webhook, assinatura Pub/Sub apagada, workflow Deploy `disabled_manually` |
 | 14/10/2026 | 1.6 | Verificado: 27 `PAUSED`, 3 serviços `internal`, 0 assinaturas, invoker do webhook vazio |
 | 14/10/2026 | 2.1 | `gs://smart-ads-cofre-temporario` criado em us-central1, regra Delete aos 24 dias, `objectAdmin` para a conta de serviço da instância SQL |
 | 14/10/2026 | 2.2 | Export SQL com offload para o cofre: `ledger_2026-10-14.sql.gz` (328 MiB), `mlflow_2026-10-14.sql.gz` (114 KiB, 219 runs), `dash_2026-10-14.sql.gz` (54 MiB) |
@@ -249,3 +250,4 @@ Os testes que dependem dos snapshots de `tests/fixtures/` já pulam quando o arq
 | 14/10/2026 | fim do dia | Pendentes: 3.8 (pasta do Drive, espera o cliente confirmar o download), 3.10 (cofre some sozinho por ciclo de vida até ~07/11, conferir), 4.1 (e-mail ao cliente depois de 3.8 e 3.10) e 4.2 (memória atualizada em 14/10, fechar no fim) |
 | 15/10/2026 | 2.3 | O filtro de colunas da exportação tinha derrubado colunas sem dado pessoal nas tabelas de `sem_dado_pessoal/` (`ad_name`, `adset_name`, `campaign_name`, `lf_name`). As 10 tabelas foram refeitas do dump do cofre, lido em streaming sem gravar nada em disco: contagem igual ao banco nas 10, zero e-mail e zero telefone. Cópia do bucket atualizada, tamanhos iguais aos locais |
 | 15/10/2026 | 2.4 | Um processo de cópia do MLflow que tinha ficado pendurado desde 14/10 foi encerrado. Conferido: 2.628 arquivos (225 `model.pkl`), nenhuma duplicata, nenhum arquivo escrito depois de 14/10. O `conjunto_de_treino.json` que ficou no run `47b0cae6` é só o resumo do parquet apagado (contagem, nomes de coluna, hash) |
+| 15/10/2026 | 3.2 | Conferência pedida pela revisão da PR #352: `bring-data-validation-reports`, o valor de `VALIDATION_REPORTS_BUCKET`, não existe (404), e os outros projetos da conta não têm bucket nem dataset do BigQuery. O dado pessoal em bucket estava só em `smart-ads-validation-reports`, limpo no passo 3.2. Scheduler conferido com zero agendadores |
