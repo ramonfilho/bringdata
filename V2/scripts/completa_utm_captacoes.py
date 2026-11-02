@@ -117,6 +117,26 @@ MAPA = "analytics._mapa_utm_tmp"
 LOTE_CARGA = 2_000       # linhas por INSERT no mapa (2.000 x 4 colunas = 8.000 parâmetros)
 LOTE_UPDATE = 10_000     # linhas por UPDATE na captacoes
 
+# A `url` entrou aqui em 12/08/2026, depois de `medium` e `term`. Quando este script foi
+# escrito, a `utm_url` já tinha sido preenchida pelo `completa_url_captacoes.py` a partir de
+# TRÊS fontes nossas (`registros_ml`, `lead_legado`, `url_captura_legado`) e chegado a 84,4%,
+# então parecia resolvida. Não estava: as três têm em comum o fato de só cobrirem
+# RESPONDENTES da pesquisa, e o déficit de 15,6% era exatamente quem não respondeu.
+#
+# A `UTMTracking` não tem esse viés: ela é o evento de clique e existe para 98,8% dos
+# cadastros, respondente ou não. Medido antes de rodar, na janela de entrega de 90 dias:
+#
+#     com url antes ............ 88.548 de 104.924   (84,4%)
+#     a UTMTracking soma ....... 15.878              (+15,1 pontos)
+#     fica em .................. 104.426             (99,5%)
+#
+#     por mês:  05/2026  73,2% -> 98,6%      07/2026  87,5% -> 99,9%
+#               06/2026  82,4% -> 99,9%      08/2026  90,2% -> 96,7%
+#
+# A lição vale para a próxima coluna incompleta: **"já foi preenchida" não é "está
+# completa"**. O que faltava não era mais uma fonte qualquer, era uma fonte SEM O MESMO VIÉS
+# das anteriores. Somar uma quarta tabela de respondentes teria somado zero.
+
 # `trackedAt` e `createdAt` no Railway são `timestamp without time zone` guardando UTC, então
 # precisam do AT TIME ZONE DUPLO: o primeiro diz "isto é UTC", o segundo converte. Um só
 # erraria em 3 horas, na direção oposta, e silenciosamente.
@@ -162,10 +182,13 @@ def _puxa_mapa() -> list:
                    lower("clientEmail")                        AS email,
                    ("trackedAt" {BRT_RAILWAY})::date            AS dia,
                    nullif(medium, '')                           AS medium,
-                   nullif(term, '')                             AS term
+                   nullif(term, '')                             AS term,
+                   nullif(url, '')                              AS url
               FROM "UTMTracking"
              WHERE nullif("clientEmail", '') IS NOT NULL
-               AND (nullif(medium, '') IS NOT NULL OR nullif(term, '') IS NOT NULL)
+               AND (nullif(medium, '') IS NOT NULL
+                 OR nullif(term, '') IS NOT NULL
+                 OR nullif(url, '') IS NOT NULL)
              ORDER BY lower("clientEmail"),
                       ("trackedAt" {BRT_RAILWAY})::date,
                       "trackedAt" DESC, id DESC""")
@@ -182,7 +205,7 @@ def _carrega_mapa(c, linhas: list) -> int:
     """
     c.run("SET lock_timeout = '30s'")
     c.run(f"DROP TABLE IF EXISTS {MAPA}")
-    c.run(f"CREATE TABLE {MAPA} (email text, dia date, medium text, term text)")
+    c.run(f"CREATE TABLE {MAPA} (email text, dia date, medium text, term text, url text)")
     for i in range(0, len(linhas), LOTE_CARGA):
         pedaco = linhas[i:i + LOTE_CARGA]
         vals, par = [], {}
@@ -192,7 +215,7 @@ def _carrega_mapa(c, linhas: list) -> int:
                 par[f"p{j}_{k}"] = v
                 marcas.append(f":p{j}_{k}")
             vals.append("(" + ",".join(marcas) + ")")
-        c.run(f"INSERT INTO {MAPA} (email, dia, medium, term) VALUES " + ",".join(vals),
+        c.run(f"INSERT INTO {MAPA} (email, dia, medium, term, url) VALUES " + ",".join(vals),
               **par)
         print(f"    mapa: {min(i + LOTE_CARGA, len(linhas)):,} de {len(linhas):,}",
               flush=True)
@@ -214,36 +237,31 @@ ALVO = f"""
     JOIN {MAPA} m ON m.email = lower(c.email) AND m.dia = {DIA_PLANILHA}
    WHERE {SO_PLANILHA}
      AND ( (nullif(c.utm_medium, '') IS NULL AND m.medium IS NOT NULL)
-        OR (nullif(c.utm_term,   '') IS NULL AND m.term   IS NOT NULL) )
+        OR (nullif(c.utm_term,   '') IS NULL AND m.term   IS NOT NULL)
+        OR (c.utm_url             IS NULL AND m.url    IS NOT NULL) )
 """
 
 
 def medir(c) -> None:
-    print("### alcance por mês: linhas de planilha sem medium, e quantas o mapa alcança")
-    for r in c.run(f"""
-        SELECT to_char(c.captured_at AT TIME ZONE 'UTC', 'YYYY-MM') mes,
-               count(*) n,
-               count(*) FILTER (WHERE m.email IS NOT NULL
-                                  AND (m.medium IS NOT NULL OR m.term IS NOT NULL)) alcanca
-          FROM analytics.captacoes c
-          LEFT JOIN {MAPA} m ON m.email = lower(c.email) AND m.dia = {DIA_PLANILHA}
-         WHERE {SO_PLANILHA} AND nullif(c.utm_medium, '') IS NULL
-         GROUP BY 1 ORDER BY 1"""):
-        pct = 100.0 * r[2] / max(r[1], 1)
-        print(f"    {r[0]}  sem medium={r[1]:>7,}  alcança={r[2]:>7,} ({pct:5.1f}%)")
+    """Alcance POR COLUNA, e a coluna medida é a mesma que o UPDATE escreve.
 
-    # A janela de 90 dias é a única que a agência vê. Reportada à parte porque é o número
-    # que responde "o que muda para o cliente", diferente de "o que muda na nossa tabela".
-    r = c.run(f"""
-        SELECT count(*), count(*) FILTER (WHERE m.email IS NOT NULL
-                                           AND (m.medium IS NOT NULL OR m.term IS NOT NULL))
-          FROM analytics.captacoes c
-          LEFT JOIN {MAPA} m ON m.email = lower(c.email) AND m.dia = {DIA_PLANILHA}
-         WHERE {SO_PLANILHA} AND nullif(c.utm_medium, '') IS NULL
-           AND c.captured_at >= (now() - interval '90 days')""")[0]
-    pct = 100.0 * r[1] / max(r[0], 1)
-    print(f"\n    JANELA DE ENTREGA (90d): {r[0]:,} sem medium, "
-          f"{r[1]:,} alcançáveis ({pct:.1f}%)")
+    Medir só `medium` e escrever três colunas era como o relatório e o efeito deixariam de
+    falar da mesma coisa — o tipo de divergência que só aparece quando alguém confere o dado
+    do cliente meses depois.
+    """
+    for col, mcol in (("utm_medium", "medium"), ("utm_term", "term"), ("utm_url", "url")):
+        vazio = (f"nullif(c.{col}, '') IS NULL" if col != "utm_url"
+                 else f"c.{col} IS NULL")
+        r = c.run(f"""
+            SELECT count(*), count(*) FILTER (WHERE m.{mcol} IS NOT NULL)
+              FROM analytics.captacoes c
+              LEFT JOIN {MAPA} m ON m.email = lower(c.email) AND m.dia = {DIA_PLANILHA}
+             WHERE {SO_PLANILHA} AND {vazio}
+               AND {DIA_PLANILHA} >= ((now() AT TIME ZONE 'America/Sao_Paulo')::date - 90)
+            """)[0]
+        pct = 100.0 * r[1] / max(r[0], 1)
+        print(f"    JANELA DE ENTREGA (90d) · {col:11s} {r[0]:>7,} vazios, "
+              f"{r[1]:>7,} alcançáveis ({pct:5.1f}%)")
 
 
 def preencher(c) -> None:
@@ -261,13 +279,14 @@ def preencher(c) -> None:
         # entrega este backfill é a `--full`, não o incremental.
         c.run(f"""
             WITH alvo AS (
-              SELECT c.ctid AS id, m.medium AS medium, m.term AS term
+              SELECT c.ctid AS id, m.medium AS medium, m.term AS term, m.url AS url
               {ALVO}
                LIMIT {LOTE_UPDATE}
             )
             UPDATE analytics.captacoes c
                SET utm_medium = coalesce(nullif(c.utm_medium, ''), alvo.medium),
-                   utm_term   = coalesce(nullif(c.utm_term,   ''), alvo.term)
+                   utm_term   = coalesce(nullif(c.utm_term,   ''), alvo.term),
+                   utm_url    = coalesce(c.utm_url, alvo.url)
               FROM alvo WHERE c.ctid = alvo.id""")
         # `run()` devolve as LINHAS de um SELECT e None num UPDATE. Ler o retorno como
         # contagem faria o laço parar na primeira volta e o script terminar dizendo
@@ -277,7 +296,7 @@ def preencher(c) -> None:
         print(f"    +{feitas:,} (total {total:,})", flush=True)
         if feitas == 0:
             break
-    print(f"\nOK: {total:,} linhas com medium/term preenchidos.")
+    print(f"\nOK: {total:,} linhas com medium/term/url preenchidos.")
 
 
 def main() -> int:
@@ -305,12 +324,13 @@ def main() -> int:
         c.run(f"DROP TABLE IF EXISTS {MAPA}")
 
         r = c.run("""SELECT count(*), count(nullif(utm_medium,'')),
-                            count(nullif(utm_term,''))
+                            count(nullif(utm_term,'')), count(utm_url)
                        FROM analytics.captacoes
                       WHERE captured_at >= (now() - interval '90 days')""")[0]
         print(f"\n### depois, na janela de entrega: {r[0]:,} linhas · "
               f"medium {100.0 * r[1] / max(r[0], 1):.1f}% · "
-              f"term {100.0 * r[2] / max(r[0], 1):.1f}%")
+              f"term {100.0 * r[2] / max(r[0], 1):.1f}% · "
+              f"url {100.0 * r[3] / max(r[0], 1):.1f}%")
         print("\nPRÓXIMO PASSO OBRIGATÓRIO: pausar o cron do incremental, rodar "
               "`push_supabase_zanelato.py --full`, retomar o cron. Ver o topo deste arquivo.")
     finally:
